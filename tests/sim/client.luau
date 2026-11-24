@@ -56,15 +56,12 @@ do
 	roundState:SetAttribute(key, value)
 end
 
-local zone = Mock.new(
-	"Part",
-	{
-		Name = "ServerZone",
-		CFrame = CFrame.new(0, 9, -96),
-		Size = Vector3.new(56, 18, 48),
-		Parent = Workspace,
-	}
-)
+local zone = Mock.new("Part", {
+	Name = "ServerZone",
+	CFrame = CFrame.new(0, 9, -96),
+	Size = Vector3.new(56, 18, 48),
+	Parent = Workspace,
+})
 zone:SetAttribute("DisplayName", "SERVER VAULT")
 zone:SetAttribute("Code", "SECTOR 03")
 zone:AddTag("RoomZone")
@@ -131,8 +128,9 @@ local ok, err = pcall(function()
 	check(Mock.coreState[tostring(roblox.Enum.CoreGuiType.Health)] == false, "health bar hidden")
 
 	print("• standby / readiness")
-	local standby = gui.Standby.StandbyPanel
-	check(standby.Visible == true, "Standby panel visible in the bay")
+	local standbyPanel = gui.Standby.StandbyPanel
+	local standby = standbyPanel.Content
+	check(standbyPanel.Visible == true, "Standby panel visible in the bay")
 	check(standby.Title.Text == "AWAITING PERSONNEL", `waiting title (got {standby.Title.Text})`)
 	check(standby.Info.Text:find("1 of 4") ~= nil, "shows ready count")
 	standby.ReadyToggle.Activated:Fire()
@@ -176,11 +174,11 @@ local ok, err = pcall(function()
 	roundState:SetAttribute("OperativesRemaining", 8)
 	roundState:SetAttribute("ExtractionRequired", 2)
 	setPhase("Deployment", 5)
-	check(standby.Visible == false, "Standby panel hidden in the facility")
+	check(standbyPanel.Visible == false, "Standby panel hidden in the facility")
 	check(gui.Hud.Objective.Visible == true, "objective card visible")
 	check(gui.Hud.Identity.Role.Value.Text == "MIMIC", "role chip shows MIMIC")
-	check(gui.Hud.Objective.Body.Text:find("Blend in") ~= nil, "Mimic deployment objective")
-	check(gui.Hud.Objective.Mimics.Value.Text == "2", "crew counts shown")
+	check(gui.Hud.Objective.Content.Body.Text:find("Blend in") ~= nil, "Mimic deployment objective")
+	check(gui.Hud.Objective.Content.Mimics.Value.Text == "2", "crew counts shown")
 	local bar = gui.Abilities.AbilityBar
 	check(
 		bar.Visible == true and Mock.boundActions.MimicAssimilate ~= nil,
@@ -297,7 +295,10 @@ local ok, err = pcall(function()
 	player:SetAttribute("Status", "Alive")
 	setPhase("Extraction", 20)
 	check(bar.Visible == false, "survivors have no Mimic ability bar")
-	check(gui.Hud.Objective.Body.Text:find("THE LIFT IS OPEN") ~= nil, "survivor extraction objective")
+	check(
+		gui.Hud.Objective.Content.Body.Text:find("THE LIFT IS OPEN") ~= nil,
+		"survivor extraction objective"
+	)
 end)
 
 if not ok then

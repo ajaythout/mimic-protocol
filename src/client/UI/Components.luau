@@ -153,6 +153,24 @@ function Components.panel(
 	return frame
 end
 
+--[[
+	Padded, auto-height content area for a panel whose children are stacked by
+	a UIListLayout. Put the layout and children here, never on the panel: its
+	corner brackets are a GuiObject child, so a layout on the panel would stack
+	them as the first item and push the real content down.
+]]
+function Components.panelContent(panel: GuiObject, all: number, horizontal: number?): Frame
+	local content = Components.create("Frame", {
+		Name = "Content",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Parent = panel,
+	})
+	Components.padding(content, all, horizontal)
+	return content
+end
+
 -- Four L-shaped corner accents drawn just outside a frame.
 function Components.brackets(parent: GuiObject, color: Color3, length: number?, thickness: number?): Frame
 	local holder = Components.create("Frame", {

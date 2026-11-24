@@ -88,8 +88,8 @@ local function build()
 		Visible = false,
 		Parent = gui,
 	})
-	Components.padding(panel, 14, 18)
-	Components.list(panel, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center)
+	local content = Components.panelContent(panel, 14, 18)
+	Components.list(content, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center)
 	ui.panel = panel
 
 	ui.title = Components.label({
@@ -99,7 +99,7 @@ local function build()
 		TextSize = Theme.TextSize.Label,
 		TextColor3 = Theme.Colors.Cyan,
 		LayoutOrder = 1,
-		Parent = panel,
+		Parent = content,
 	}, "Display")
 	ui.info = Components.label({
 		Name = "Info",
@@ -110,14 +110,14 @@ local function build()
 		TextSize = Theme.TextSize.Body,
 		TextColor3 = Theme.Colors.TextMuted,
 		LayoutOrder = 2,
-		Parent = panel,
+		Parent = content,
 	}, "Body")
 	local toggle, stroke = Components.button({
 		Name = "ReadyToggle",
 		Size = UDim2.fromOffset(300, 40),
 		LayoutOrder = 3,
 		Text = "",
-		Parent = panel,
+		Parent = content,
 	})
 	ui.toggle = toggle
 	ui.toggleStroke = stroke

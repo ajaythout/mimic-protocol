@@ -177,8 +177,8 @@ local function build()
 		Visible = false,
 		Parent = gui,
 	})
-	Components.padding(objective, 12, 14)
-	Components.list(objective, 8)
+	local objectiveContent = Components.panelContent(objective, 12, 14)
+	Components.list(objectiveContent, 8)
 	ui.objective = objective
 	ui.objectiveHeader = Components.label({
 		Name = "Header",
@@ -187,7 +187,7 @@ local function build()
 		TextColor3 = Theme.Colors.Cyan,
 		Text = "OBJECTIVE",
 		LayoutOrder = 1,
-		Parent = objective,
+		Parent = objectiveContent,
 	}, "Display")
 	ui.objectiveBody = Components.label({
 		Name = "Body",
@@ -198,7 +198,7 @@ local function build()
 		TextSize = Theme.TextSize.Body,
 		Text = "",
 		LayoutOrder = 2,
-		Parent = objective,
+		Parent = objectiveContent,
 	}, "Body")
 	Components.create("Frame", {
 		Name = "Divider",
@@ -206,7 +206,7 @@ local function build()
 		BackgroundColor3 = Theme.Colors.StrokeMuted,
 		BorderSizePixel = 0,
 		LayoutOrder = 3,
-		Parent = objective,
+		Parent = objectiveContent,
 	})
 	local function statRow(name: string, caption: string, order: number): TextLabel
 		local row = Components.create("Frame", {
@@ -214,7 +214,7 @@ local function build()
 			BackgroundTransparency = 1,
 			Size = UDim2.new(1, 0, 0, 18),
 			LayoutOrder = order,
-			Parent = objective,
+			Parent = objectiveContent,
 		})
 		Components.label({
 			Name = "Caption",
