@@ -1,0 +1,8 @@
+/build/*.rbxm
+/*.rbxlx
+/sourcemap.json
+/roblox.yml
+/out/
+/dist/
+/build/*.json
+/build/*.svg
