@@ -125,6 +125,21 @@ farCrate:AddTag("MimicProp")
 local desk = propModel("Desk", "Desk", true, Vector3.new(-60, 0, 0), propsFolder)
 desk:AddTag("MimicProp")
 
+-- Generators (power objective) ---------------------------------------------------------------
+
+local generatorModels = {}
+for index, id in { "GEN-A", "GEN-B", "GEN-C" } do
+	local model = Mock.new("Model", { Name = "Generator", Parent = facility })
+	model:SetAttribute("GeneratorId", id)
+	model:SetAttribute("DisplayName", `GENERATOR {string.sub(id, -1)}`)
+	Mock.new("Part", { Name = "Panel", CFrame = CFrame.new(200 + index * 40, 3, 0), Parent = model })
+	Mock.new("Part", { Name = "Status", Parent = model })
+	local core = Mock.new("Part", { Name = "Core", Parent = model })
+	Mock.new("PointLight", { Name = "PointLight", Enabled = true, Parent = core })
+	model:AddTag("Generator")
+	generatorModels[id] = model
+end
+
 -- Fast timings (every phase is clamped to >= 1 s by the server) -------------------------------
 
 local GameConfig = Mock.requireModule(shared.Config.GameConfig)
@@ -144,6 +159,10 @@ GameConfig.Players.MinStudio = 2
 GameConfig.Dev.FastRoundsInStudio = false
 GameConfig.ObjectShift.Cooldown = 0.5
 GameConfig.IdentityTheft.Cooldown = 0.5
+-- Earlier rounds predate the power objective; Round 9 switches it on.
+GameConfig.Generators.Required = 0
+GameConfig.Generators.RepairSeconds = 1
+GameConfig.Generators.TickInterval = 0.05
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -844,6 +863,136 @@ local ok, err = pcall(function()
 	check(requestTheft(mimic).result == "Copied", "impersonating when the round ends")
 	waitForPhase("Results", 15)
 	check(not Shifts.isImpersonating(mimic), "round end clears every impersonation")
+	GameConfig.Generators.Required = 2
+
+	-- ===================================================================================
+	section("Round 9: generator repair gates the lift")
+	local genA, genB, genC = generatorModels["GEN-A"], generatorModels["GEN-B"], generatorModels["GEN-C"]
+	local function prompt(model)
+		return model.Panel:FindFirstChild("RepairPrompt")
+	end
+	local function standAt(player, model)
+		root(player).CFrame = model.Panel.CFrame * CFrame.new(0, 0, 3)
+	end
+	local function progress(model): number
+		return model:GetAttribute("Progress") or 0
+	end
+	local function announced(player, title: string): boolean
+		for _, args in Mock.sent(player, "Announcement") do
+			if args[1].title == title then
+				return true
+			end
+		end
+		return false
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(
+		roundState:GetAttribute("GeneratorsRequired") == 2
+			and roundState:GetAttribute("GeneratorsOnline") == 0
+			and roundState:GetAttribute("PowerRestored") == false,
+		"round starts with every generator offline and power required"
+	)
+	check(
+		prompt(genA) ~= nil and prompt(genA).ActionText == "REPAIR",
+		"each generator panel has a REPAIR prompt"
+	)
+
+	standAt(survivors[1], genA)
+	prompt(genA).Triggered:Fire(survivors[1])
+	standAt(mimic, genB)
+	prompt(genB).Triggered:Fire(mimic)
+	task.wait(0.1)
+	check(
+		survivors[1]:GetAttribute("Repairing") == "GEN-A" and mimic:GetAttribute("Repairing") == "GEN-B",
+		"survivors and Mimics both show as repairing (no role tell)"
+	)
+	check(
+		waitUntil(function()
+			return genA:GetAttribute("Online") == true
+		end, 3),
+		"a survivor brings a generator online"
+	)
+	check(
+		roundState:GetAttribute("GeneratorsOnline") == 1
+			and survivors[1]:GetAttribute("Repairing") == nil
+			and prompt(genA).Enabled == false,
+		"online generator counted, its repairer released and its prompt disabled"
+	)
+	check(
+		progress(genB) == 0 and mimic:GetAttribute("Repairing") == "GEN-B",
+		"a Mimic's fake repair adds nothing"
+	)
+
+	standAt(survivors[2], genC)
+	prompt(genC).Triggered:Fire(survivors[2])
+	task.wait(0.2)
+	root(survivors[2]).CFrame = CFrame.new(-300, 3, 0)
+	check(
+		waitUntil(function()
+			return survivors[2]:GetAttribute("Repairing") == nil
+		end, 1),
+		"walking away stops a repair"
+	)
+	local kept = progress(genC)
+	task.wait(0.2)
+	check(kept > 0 and progress(genC) == kept, "progress is kept but stops when nobody works on it")
+	prompt(genB).Triggered:Fire(mimic)
+	task.wait(0.1)
+	check(mimic:GetAttribute("Repairing") == nil, "triggering again stops repairing")
+
+	waitForPhase("Extraction", 15)
+	task.wait(0.1)
+	check(roundState:GetAttribute("ExtractionOpen") == false, "the lift stays shut without power")
+	check(announced(survivors[1], "LIFT WITHOUT POWER"), "players are told the lift needs power")
+
+	standAt(survivors[2], genC)
+	standAt(survivors[3] or survivors[1], genC)
+	prompt(genC).Triggered:Fire(survivors[2])
+	prompt(genC).Triggered:Fire(survivors[3] or survivors[1])
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("PowerRestored") == true
+		end, 2),
+		"the second generator restores power"
+	)
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("ExtractionOpen") == true
+		end, 1),
+		"restoring power mid-Extraction opens the lift at once"
+	)
+	for _, s in survivors do
+		if status(s) == "Alive" then
+			root(s).CFrame = liftZone.CFrame
+		end
+	end
+	waitForPhase("Results", 10)
+	result = lastResult(players[1])
+	check(
+		result and result.winner == "Survivors",
+		`survivors escape once power is back (got {result and result.reason})`
+	)
+
+	-- ===================================================================================
+	section("Round 10: the lift never gets power")
+	waitForPhase("Deployment", 15)
+	check(
+		roundState:GetAttribute("GeneratorsOnline") == 0
+			and progress(genA) == 0
+			and genA:GetAttribute("Online") == false,
+		"generators reset between rounds"
+	)
+	waitForPhase("Results", 20)
+	result = lastResult(players[1])
+	check(
+		result and result.winner == "Mimics" and result.reason == "PowerFailure",
+		`no power means Mimics win by PowerFailure (got {result and result.reason})`
+	)
+	GameConfig.Generators.Required = 0
 end)
 
 if not ok then

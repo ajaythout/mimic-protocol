@@ -39,6 +39,9 @@
           "SurvivorsExtracted": 0,
           "ExtractionRequired": 0,
           "ExtractionOpen": false,
+          "GeneratorsOnline": 0,
+          "GeneratorsRequired": 0,
+          "PowerRestored": false,
           "MimicCount": 0
         }
       }

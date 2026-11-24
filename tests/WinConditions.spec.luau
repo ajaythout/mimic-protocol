@@ -105,6 +105,22 @@ T.describe("WinConditions.evaluate", function()
 		T.expectEq(lose and lose.winner, "Mimics")
 		T.expectEq(lose and lose.reason, "ExtractionFailed")
 	end)
+	T.it("blames the power when the lift never had any", function()
+		local unpowered = WinConditions.evaluate(
+			snap({ extractionClosed = true, powerRestored = false, survivorsExtracted = 0 }),
+			RULES
+		)
+		T.expectEq(unpowered and unpowered.winner, "Mimics")
+		T.expectEq(unpowered and unpowered.reason, "PowerFailure")
+		local powered = WinConditions.evaluate(
+			snap({ extractionClosed = true, powerRestored = true, survivorsExtracted = 0 }),
+			RULES
+		)
+		T.expectEq(powered and powered.reason, "ExtractionFailed")
+	end)
+	T.it("never decides anything from power while the lift window is open", function()
+		T.expectEq(WinConditions.evaluate(snap({ powerRestored = false }), RULES), nil)
+	end)
 	T.it("treats an empty round as abandoned", function()
 		local o = WinConditions.evaluate(
 			snap({ mimicsActive = 0, survivorsActive = 0, survivorsDisconnected = 6 }),

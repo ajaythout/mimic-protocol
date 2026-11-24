@@ -24,6 +24,7 @@ local ORDER = {
 	"ResultsController",
 	"BayScreenController",
 	"EffectsController",
+	"GeneratorController",
 	"CoreGuiController",
 }
 

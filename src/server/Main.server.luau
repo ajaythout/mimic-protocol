@@ -21,6 +21,7 @@ local ORDER = {
 	"MimicAbilityService",
 	"EliminationService",
 	"ExtractionService",
+	"GeneratorService",
 	"ChatService",
 	"RoundService",
 }

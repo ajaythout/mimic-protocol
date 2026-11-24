@@ -42,6 +42,7 @@ local CharacterService = require(script.Parent.CharacterService)
 local EliminationService = require(script.Parent.EliminationService)
 local ExtractionService = require(script.Parent.ExtractionService)
 local FacilityService = require(script.Parent.FacilityService)
+local GeneratorService = require(script.Parent.GeneratorService)
 local MatchState = require(script.Parent.MatchState)
 local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
@@ -129,6 +130,7 @@ local function evaluate(round: MatchState.Round)
 	local beforeActive = phase == Phases.RoleReveal or phase == Phases.Deployment
 
 	local snapshot = MatchState.snapshot(round)
+	snapshot.powerRestored = GeneratorService.isPowered()
 	if snapshot.mimicsActive == 0 and beforeActive then
 		local promoted = RoleService.promoteReplacement(round)
 		if promoted then
@@ -140,6 +142,7 @@ local function evaluate(round: MatchState.Round)
 				6
 			)
 			snapshot = MatchState.snapshot(round)
+			snapshot.powerRestored = GeneratorService.isPowered()
 		end
 	end
 
@@ -182,6 +185,7 @@ local function runRound(round: MatchState.Round)
 		return round.outcome ~= nil
 	end
 
+	GeneratorService.reset()
 	RoleService.assign(round)
 	round.janitor:Add(MatchState.FateChanged:Connect(function()
 		evaluate(round)
@@ -242,21 +246,47 @@ local function runRound(round: MatchState.Round)
 	local escalationDuration = phaseDuration("Escalation")
 	FacilityService.setLightingMode("Emergency")
 	MatchState.setPhase(Phases.Escalation, escalationDuration)
-	Announcer.all("ESCALATION", "Emergency power engaged. The extraction lift is on its way.", "Critical", 6)
+	Announcer.all(
+		"ESCALATION",
+		if GeneratorService.isPowered()
+			then "Emergency power engaged. The extraction lift is on its way."
+			else "Emergency power engaged. Restore the generators or the lift never comes.",
+		"Critical",
+		6
+	)
 	if waitPhase(escalationDuration, triggers, over) then
 		return
 	end
 
 	-- EXTRACTION ------------------------------------------------------------------
 	local extractionDuration = phaseDuration("Extraction")
-	ExtractionService.open()
-	MatchState.setPhase(Phases.Extraction, extractionDuration)
-	Announcer.all(
-		"EXTRACTION LIFT OPEN",
-		"Reach the lift south of the Central Atrium before it departs.",
-		"Success",
-		6
-	)
+	local function openLift()
+		ExtractionService.open()
+		Announcer.all(
+			"EXTRACTION LIFT OPEN",
+			"Reach the lift south of the Central Atrium before it departs.",
+			"Success",
+			6
+		)
+	end
+	if GeneratorService.isPowered() then
+		openLift()
+		MatchState.setPhase(Phases.Extraction, extractionDuration)
+	else
+		-- The lift only opens once the generators are back; it may never.
+		MatchState.setPhase(Phases.Extraction, extractionDuration)
+		Announcer.all(
+			"LIFT WITHOUT POWER",
+			"Restore the generators. The lift opens the moment power returns.",
+			"Critical",
+			6
+		)
+		round.janitor:Add(GeneratorService.PowerRestored:Connect(function()
+			if MatchState.getPhase() == Phases.Extraction and not round.outcome then
+				openLift()
+			end
+		end))
+	end
 
 	local warningAt = math.max(0, extractionDuration - EXTRACTION_FINAL_WARNING)
 	if warningAt > 0 then
@@ -323,6 +353,7 @@ local function finishRound(round: MatchState.Round)
 
 	step("environment", function()
 		MimicAbilityService.reset()
+		GeneratorService.reset()
 		ExtractionService.close()
 		FacilityService.setLightingMode("Normal")
 	end)

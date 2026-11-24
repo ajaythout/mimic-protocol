@@ -78,6 +78,20 @@ GameConfig.Strike = {
 	CloseRange = 3.5,
 }
 
+-- Generators: the power objective that gates the extraction lift -----------
+GameConfig.Generators = {
+	-- Online generators needed before the lift can open (capped at however
+	-- many the map has; 0 means the lift is always powered).
+	Required = 2,
+	-- One survivor, from empty to online.
+	RepairSeconds = 30,
+	-- Extra hands speed a repair up, to at most this many at once.
+	MaxRepairers = 2,
+	-- Prompt distance; repairers who step further away stop.
+	Range = 8,
+	TickInterval = 0.25,
+}
+
 -- Mimic ability: Object Shift (disguise as a facility prop) -------------------
 GameConfig.ObjectShift = {
 	-- Max distance from the Mimic's root to the prop being copied.

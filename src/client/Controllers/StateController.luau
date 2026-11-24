@@ -110,6 +110,9 @@ function StateController.Start()
 			"EligiblePlayers",
 			"RequiredPlayers",
 			"ExtractionOpen",
+			"GeneratorsOnline",
+			"GeneratorsRequired",
+			"PowerRestored",
 		}
 	do
 		roundState:GetAttributeChangedSignal(name):Connect(function()

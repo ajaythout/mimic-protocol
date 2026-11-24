@@ -108,6 +108,7 @@ local EVENT_NAMES = {
 	SelectionLost = true,
 	LastInputTypeChanged = true,
 	DescendantAdded = true,
+	Triggered = true,
 }
 
 local Methods = {}
