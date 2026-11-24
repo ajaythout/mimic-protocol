@@ -19,6 +19,8 @@
         "ClientReady": { "$className": "RemoteEvent" },
         "SetAfk": { "$className": "RemoteEvent" },
         "RequestStrike": { "$className": "RemoteEvent" },
+        "RequestAbility": { "$className": "RemoteEvent" },
+        "RequestSabotage": { "$className": "RemoteEvent" },
         "PrivateState": { "$className": "RemoteEvent" },
         "RoleReveal": { "$className": "RemoteEvent" },
         "AbilityState": { "$className": "RemoteEvent" },
@@ -38,6 +40,10 @@
           "SurvivorsExtracted": 0,
           "ExtractionRequired": 0,
           "ExtractionOpen": false,
+          "GeneratorsOnline": 0,
+          "GeneratorsRequired": 0,
+          "PowerRestored": false,
+          "CamerasOnline": true,
           "MimicCount": 0
         }
       }

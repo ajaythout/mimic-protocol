@@ -17,6 +17,7 @@ local Controllers = script.Parent:WaitForChild("Controllers")
 local ORDER = {
 	"StateController",
 	"HudController",
+	"SabotageController",
 	"AbilityController",
 	"LobbyController",
 	"AnnouncementController",
@@ -24,6 +25,8 @@ local ORDER = {
 	"ResultsController",
 	"BayScreenController",
 	"EffectsController",
+	"GeneratorController",
+	"CameraController",
 	"CoreGuiController",
 }
 

@@ -18,8 +18,12 @@ local ORDER = {
 	"CharacterService",
 	"FacilityService",
 	"RoleService",
+	"MimicAbilityService",
 	"EliminationService",
 	"ExtractionService",
+	"GeneratorService",
+	"SabotageService",
+	"ScannerService",
 	"ChatService",
 	"RoundService",
 }

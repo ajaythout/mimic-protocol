@@ -18,6 +18,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
@@ -34,6 +35,7 @@ local LOBBY_TAG = "LobbySpawn"
 local FACILITY_TAG = "FacilitySpawn"
 
 local spawnTokens: { [Player]: number } = {}
+local stunnedUntil: { [Player]: number } = {}
 local pendingRespawns: { [Player]: thread } = {}
 local deathHandler: ((Player, Model) -> ())? = nil
 local random = Random.new()
@@ -115,6 +117,7 @@ function CharacterService.Init()
 	PlayerRegistry.PlayerRemoving:Connect(function(player: Player)
 		cancelPendingRespawn(player)
 		spawnTokens[player] = nil
+		stunnedUntil[player] = nil
 	end)
 end
 
@@ -192,6 +195,56 @@ function CharacterService.deployTo(player: Player, cframe: CFrame): Model?
 		return character
 	end
 	return CharacterService.spawnAt(player, cframe)
+end
+
+--[[
+	True when nothing but characters lies between two points. Characters
+	(including anything welded into them, like a disguise) never block, so
+	walls, doors and props are what count.
+]]
+function CharacterService.hasLineOfSight(from: Vector3, to: Vector3): boolean
+	local characters = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(characters, player.Character)
+		end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = characters
+	params.IgnoreWater = true
+	return Workspace:Raycast(from, to - from, params) == nil
+end
+
+--[[
+	Freezes a living character for `seconds` (no walking or jumping). Ability
+	services refuse requests while isStunned is true. A respawn clears it.
+]]
+function CharacterService.stun(player: Player, seconds: number)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local untilTime = os.clock() + seconds
+	stunnedUntil[player] = untilTime
+	humanoid.WalkSpeed = 0
+	humanoid.JumpHeight = 0
+	task.delay(seconds, function()
+		if stunnedUntil[player] ~= untilTime then
+			return
+		end
+		stunnedUntil[player] = nil
+		if player.Character == character and humanoid.Health > 0 then
+			humanoid.WalkSpeed = GameConfig.Characters.WalkSpeed
+			humanoid.JumpHeight = GameConfig.Characters.JumpHeight
+		end
+	end)
+end
+
+function CharacterService.isStunned(player: Player): boolean
+	local untilTime = stunnedUntil[player]
+	return untilTime ~= nil and os.clock() < untilTime
 end
 
 function CharacterService.getRoot(player: Player): BasePart?

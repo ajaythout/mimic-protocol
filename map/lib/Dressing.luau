@@ -332,27 +332,48 @@ builders.Server = function(ctx)
 	titleSign(ctx, 0, 14.5, 23.7, 0, -1, 22)
 end
 
-local function generatorUnit(ctx: Ctx, gx: number, gz: number)
+--[[
+	Repairable generator contract (GeneratorService):
+	  Model tagged "Generator", attributes GeneratorId, DisplayName
+	    Panel   the repair point; the REPAIR prompt attaches here
+	    Status  neon strip, red while offline and cyan once online
+	    Core    glow part whose PointLight is lit only while online
+	Generators start offline every round.
+]]
+local function generatorModel(ctx: Ctx, id: string, displayName: string, parts: { any }): any
+	local model = B.model(ctx.model, "Generator")
+	B.attrs(model, { GeneratorId = id, DisplayName = displayName })
+	B.tag(model, "Generator")
+	for _, part in parts do
+		part.Parent = model
+	end
+	model.PrimaryPart = parts[1]
+	return model
+end
+
+local function generatorUnit(ctx: Ctx, gx: number, gz: number, id: string, displayName: string)
 	ctx.box("GenPlatform", V(14, 0.8, 16), gx, 0.4, gz, S.Trim)
 	ctx.box("GenHousing", V(10, 8, 12), gx, 4.8, gz, Local.Gunmetal)
 	ctx.box("GenVent", V(8, 3.2, 0.2), gx, 4.6, gz + 6.05, S.Grate)
-	ctx.box("GenStatus", V(8, 0.3, 0.12), gx, 7.4, gz + 6.07, S.NeonCyan)
+	local status = ctx.box("Status", V(8, 0.3, 0.12), gx, 7.4, gz + 6.07, S.NeonRed)
+	local panel = ctx.box("Panel", V(2.4, 2.4, 0.3), gx - 3.4, 2.6, gz + 6.15, Local.Screen)
 	ctx.cylX("GenTurbine", 11, 5.6, gx, 11.4, gz, Local.Silver, 90)
 	ctx.cylX("GenTurbineCapA", 0.6, 6.2, gx, 11.4, gz - 5.6, Local.DarkMetal, 90)
 	ctx.cylX("GenTurbineCapB", 0.6, 6.2, gx, 11.4, gz + 5.6, Local.DarkMetal, 90)
 	for _, dx in { -3.2, 3.2 } do
 		ctx.cylY("GenExhaust", 10, 1.6, gx + dx, 19, gz - 3, Local.DarkMetal)
 	end
-	local glow = ctx.box("GenCore", V(3, 1.2, 0.2), gx, 2.4, gz + 6.07, S.NeonCyan)
-	B.pointLight(glow, rgb(120, 220, 255), 1.1, 18)
+	local glow = ctx.box("Core", V(3, 1.2, 0.2), gx, 2.4, gz + 6.07, S.NeonCyan)
+	B.pointLight(glow, rgb(120, 220, 255), 1.1, 18, {})
 	local beacon = ctx.box("GenBeacon", V(1, 0.8, 1), gx + 4, 9.2, gz + 5, S.Beacon)
 	B.tag(beacon, "EmergencyBeacon")
 	hazardFrame(ctx, gx, gz, 14, 16)
+	generatorModel(ctx, id, displayName, { panel, status, glow })
 end
 
 builders.Generator = function(ctx)
-	generatorUnit(ctx, -13, -13)
-	generatorUnit(ctx, 13, -13)
+	generatorUnit(ctx, -13, -13, "GEN-A", "GENERATOR A")
+	generatorUnit(ctx, 13, -13, "GEN-B", "GENERATOR B")
 	ctx.cylX("CeilingPipe", 56, 1.6, 0, 20, -25, Local.DarkMetal)
 	ctx.cylX("CeilingPipe", 56, 1.0, 0, 21.6, -23.5, Local.Gunmetal)
 	truss(ctx, 56, 4, 18, true)
@@ -402,6 +423,10 @@ builders.Security = function(ctx)
 	for _, x in { -7, 0, 7 } do
 		ctx.workstation(x, -14, 180, x == 0)
 	end
+	-- Camera console in front of the monitor wall: the VIEW CAMERAS prompt
+	-- (FacilityService) attaches to this invisible anchor.
+	local console = ctx.box("CameraConsole", V(2, 2, 1), 0, 3, -18.5, S.Invisible)
+	B.tag(console, "CameraTerminal")
 	ctx.prop("FilingCabinet", 24.5, -16, 90)
 	ctx.prop("FilingCabinet", 24.5, -12.8, 90)
 	ctx.prop("Locker", 24.5, 14, 90)
@@ -605,6 +630,16 @@ builders.Pump = function(ctx)
 	ctx.prop("Barrel", 9, -9)
 	ctx.prop("Barrel", 11, -5.5)
 	ctx.prop("ToolCart", 9.5, 1, 90)
+
+	-- Auxiliary generator against the north wall: the third repair site, so
+	-- the crew has to split up.
+	ctx.box("AuxGenHousing", V(5, 4.4, 3), 0, 2.2, -11.5, Local.Gunmetal)
+	ctx.box("AuxGenVent", V(3.6, 1.2, 0.12), 0, 3.6, -9.94, S.Grate)
+	local auxStatus = ctx.box("Status", V(4, 0.25, 0.12), 0, 4.5, -9.94, S.NeonRed)
+	local auxCore = ctx.box("Core", V(1.4, 0.8, 0.12), 1.3, 1.4, -9.94, S.NeonCyan)
+	B.pointLight(auxCore, rgb(120, 220, 255), 0.9, 12, {})
+	local auxPanel = ctx.box("Panel", V(1.8, 1.8, 0.25), -1.2, 1.9, -9.88, Local.Screen)
+	generatorModel(ctx, "GEN-C", "AUX GENERATOR", { auxPanel, auxStatus, auxCore })
 	ctx.sign("WarningSign", V(7, 1.4, 0.2), 0, 9, -13.7, 0, 1, "PRESSURE HAZARD", {
 		textColor = C.Red,
 	})

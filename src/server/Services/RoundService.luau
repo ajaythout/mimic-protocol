@@ -42,9 +42,13 @@ local CharacterService = require(script.Parent.CharacterService)
 local EliminationService = require(script.Parent.EliminationService)
 local ExtractionService = require(script.Parent.ExtractionService)
 local FacilityService = require(script.Parent.FacilityService)
+local GeneratorService = require(script.Parent.GeneratorService)
 local MatchState = require(script.Parent.MatchState)
+local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
 local RoleService = require(script.Parent.RoleService)
+local SabotageService = require(script.Parent.SabotageService)
+local ScannerService = require(script.Parent.ScannerService)
 
 local RoundService = {}
 
@@ -128,6 +132,7 @@ local function evaluate(round: MatchState.Round)
 	local beforeActive = phase == Phases.RoleReveal or phase == Phases.Deployment
 
 	local snapshot = MatchState.snapshot(round)
+	snapshot.powerRestored = GeneratorService.isPowered()
 	if snapshot.mimicsActive == 0 and beforeActive then
 		local promoted = RoleService.promoteReplacement(round)
 		if promoted then
@@ -139,6 +144,7 @@ local function evaluate(round: MatchState.Round)
 				6
 			)
 			snapshot = MatchState.snapshot(round)
+			snapshot.powerRestored = GeneratorService.isPowered()
 		end
 	end
 
@@ -181,6 +187,8 @@ local function runRound(round: MatchState.Round)
 		return round.outcome ~= nil
 	end
 
+	GeneratorService.reset()
+	ScannerService.reset()
 	RoleService.assign(round)
 	round.janitor:Add(MatchState.FateChanged:Connect(function()
 		evaluate(round)
@@ -220,6 +228,9 @@ local function runRound(round: MatchState.Round)
 	local activeDuration = phaseDuration("Active")
 	MatchState.setPhase(Phases.Active, activeDuration)
 	EliminationService.primeCooldowns(GameConfig.Strike.InitialCooldown)
+	MimicAbilityService.primeCooldowns()
+	SabotageService.primeCooldowns()
+	ScannerService.primeCharges()
 	Announcer.all("CONTAINMENT BREACH", "Something in this facility is not what it seems.", "Critical", 5)
 	mimicPlayers = {}
 	for _, mimic in MatchState.getActiveByRole("Mimic") do
@@ -240,31 +251,82 @@ local function runRound(round: MatchState.Round)
 	local escalationDuration = phaseDuration("Escalation")
 	FacilityService.setLightingMode("Emergency")
 	MatchState.setPhase(Phases.Escalation, escalationDuration)
-	Announcer.all("ESCALATION", "Emergency power engaged. The extraction lift is on its way.", "Critical", 6)
+	Announcer.all(
+		"ESCALATION",
+		if GeneratorService.isPowered()
+			then "Emergency power engaged. The extraction lift is on its way."
+			else "Emergency power engaged. Restore the generators or the lift never comes.",
+		"Critical",
+		6
+	)
 	if waitPhase(escalationDuration, triggers, over) then
 		return
 	end
 
 	-- EXTRACTION ------------------------------------------------------------------
 	local extractionDuration = phaseDuration("Extraction")
-	ExtractionService.open()
-	MatchState.setPhase(Phases.Extraction, extractionDuration)
-	Announcer.all(
-		"EXTRACTION LIFT OPEN",
-		"Reach the lift south of the Central Atrium before it departs.",
-		"Success",
-		6
-	)
+	local function openLift()
+		ExtractionService.open()
+		Announcer.all(
+			"EXTRACTION LIFT OPEN",
+			"Reach the lift south of the Central Atrium before it departs.",
+			"Success",
+			6
+		)
+	end
+	if GeneratorService.isPowered() then
+		openLift()
+		MatchState.setPhase(Phases.Extraction, extractionDuration)
+	else
+		-- The lift only opens once the generators are back; it may never.
+		MatchState.setPhase(Phases.Extraction, extractionDuration)
+		Announcer.all(
+			"LIFT WITHOUT POWER",
+			"Restore the generators. The lift opens the moment power returns.",
+			"Critical",
+			6
+		)
+		round.janitor:Add(GeneratorService.PowerRestored:Connect(function()
+			if MatchState.getPhase() == Phases.Extraction and not round.outcome then
+				openLift()
+			end
+		end))
+	end
 
-	local warningAt = math.max(0, extractionDuration - EXTRACTION_FINAL_WARNING)
-	if warningAt > 0 then
-		if waitPhase(warningAt, triggers, over) then
+	-- The window can shrink while it is open (scanner false positives), so wait
+	-- against a deadline that is recomputed whenever the penalty changes.
+	local extractionStart = Workspace:GetServerTimeNow()
+	local shortest = extractionDuration * GameConfig.Scanner.MinExtractionFraction
+	local function deadline(): number
+		return extractionStart + math.max(shortest, extractionDuration - round.extractionPenalty)
+	end
+	MatchState.setPhaseEndsAt(deadline())
+	local penaltyChanged = Signal.new()
+	local deadlineMoved = false
+	round.janitor:Add(ScannerService.PenaltyChanged:Connect(function()
+		MatchState.setPhaseEndsAt(deadline())
+		deadlineMoved = true
+		penaltyChanged:Fire()
+	end))
+	local function wake(): boolean
+		return over() or deadlineMoved
+	end
+	local warned = false
+	while true do
+		local remaining = deadline() - Workspace:GetServerTimeNow()
+		if remaining <= 0 then
+			break
+		end
+		if not warned and remaining <= EXTRACTION_FINAL_WARNING then
+			warned = true
+			Announcer.all(`LIFT DEPARTS IN {math.ceil(remaining)} SECONDS`, nil, "Critical", 4)
+		end
+		local slice = if warned then remaining else remaining - EXTRACTION_FINAL_WARNING
+		deadlineMoved = false
+		waitPhase(slice, { roundInterrupt, penaltyChanged }, wake)
+		if over() then
 			return
 		end
-		Announcer.all(`LIFT DEPARTS IN {EXTRACTION_FINAL_WARNING} SECONDS`, nil, "Critical", 4)
-	end
-	if waitPhase(extractionDuration - warningAt, triggers, over) then
-		return
 	end
 
 	round.extractionClosed = true
@@ -320,6 +382,10 @@ local function finishRound(round: MatchState.Round)
 	local payload: Net.RoundResultPayload? = nil
 
 	step("environment", function()
+		MimicAbilityService.reset()
+		SabotageService.reset()
+		ScannerService.reset()
+		GeneratorService.reset()
 		ExtractionService.close()
 		FacilityService.setLightingMode("Normal")
 	end)

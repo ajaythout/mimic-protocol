@@ -8,6 +8,10 @@
 	  ClientReady    C->S  ()                       client UI is loaded
 	  SetAfk         C->S  (afk: boolean)           readiness toggle in Standby
 	  RequestStrike  C->S  ()                       intent only; server picks target
+	  RequestAbility C->S  (ability, target?)       Mimic/Survivor abilities; target is
+	                                              a hint the server re-validates
+	  RequestSabotage C->S (kind)                   intent only; server picks the room,
+	                                              door or generator
 	  PrivateState   S->C  PrivateStatePayload      the receiving player's role
 	  RoleReveal     S->C  RoleRevealPayload        start-of-round reveal
 	  AbilityState   S->C  AbilityStatePayload      server-confirmed cooldowns
@@ -39,10 +43,13 @@ export type RoleRevealPayload = {
 }
 
 export type AbilityStatePayload = {
-	ability: string,
+	ability: string, -- one of Net.Abilities
 	readyAt: number, -- Workspace:GetServerTimeNow() timestamp
 	cooldown: number,
-	result: string?, -- "Hit" | "NoTarget" | "Locked" | nil
+	result: string?, -- "Hit" | "NoTarget" | "Locked" | "Cooldown" | "Shifted" | "Reverted" | nil
+	activeUntil: number?, -- set while a lasting effect (a disguise) is running
+	detail: string?, -- display text for the result, e.g. the prop's name
+	charges: number?, -- uses left, for limited abilities (Scan)
 }
 
 export type AnnouncementPayload = {
@@ -82,6 +89,8 @@ Net.Names = {
 	ClientReady = "ClientReady",
 	SetAfk = "SetAfk",
 	RequestStrike = "RequestStrike",
+	RequestAbility = "RequestAbility",
+	RequestSabotage = "RequestSabotage",
 	PrivateState = "PrivateState",
 	RoleReveal = "RoleReveal",
 	AbilityState = "AbilityState",
@@ -89,6 +98,18 @@ Net.Names = {
 	EliminationFx = "EliminationFx",
 	RoundResult = "RoundResult",
 }
+
+-- Ability ids used by RequestAbility and AbilityState.
+Net.Abilities = {
+	Assimilate = "Assimilate",
+	ObjectShift = "ObjectShift",
+	IdentityTheft = "IdentityTheft",
+	Sabotage = "Sabotage", -- AbilityState.detail names the kind
+	Scan = "Scan", -- survivors' Containment Scanner
+}
+
+-- Sabotage kinds accepted by RequestSabotage (see SabotageService).
+Net.SabotageKinds = { "Lights", "Lockdown", "FalseAlert", "Generator", "Cameras" }
 
 local remotesFolder: Folder? = nil
 

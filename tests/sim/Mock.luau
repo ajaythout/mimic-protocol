@@ -108,6 +108,7 @@ local EVENT_NAMES = {
 	SelectionLost = true,
 	LastInputTypeChanged = true,
 	DescendantAdded = true,
+	Triggered = true,
 }
 
 local Methods = {}
@@ -136,6 +137,11 @@ local function new(className: string, props: { [string]: any }?)
 		props0.Health = 100
 		props0.MaxHealth = 100
 		props0.WalkSpeed = 16
+		props0.JumpHeight = 7.2
+		props0.HipHeight = 2
+		props0.RigType = roblox.Enum.HumanoidRigType.R15
+		props0.DisplayDistanceType = roblox.Enum.HumanoidDisplayDistanceType.Viewer
+		props0.DisplayName = ""
 		rawget(inst, "_signals").Died = newSignal()
 	end
 	if props then
@@ -382,6 +388,71 @@ function Methods.HasTag(self, tag)
 	return rawget(self, "_tags")[tag] == true
 end
 
+-- HumanoidDescription stand-in: an instance whose "Look" attribute names the
+-- character it was read from, so tests can tell whose appearance is applied.
+function Methods.GetAppliedDescription(self)
+	local props = rawget(self, "_props")
+	if not props.AppliedDescription then
+		local description = new("HumanoidDescription", { Name = "HumanoidDescription" })
+		description:SetAttribute("Look", if props.Parent then props.Parent.Name else "?")
+		props.AppliedDescription = description
+	end
+	return props.AppliedDescription
+end
+function Methods.ApplyDescription(self, description)
+	task.wait(0.05) -- the real call yields while assets load
+	rawget(self, "_props").AppliedDescription = description
+end
+
+-- Sounds: playing is a no-op, but the call is recorded for tests. Tweens
+-- carry their own Play in _props (see Methods.Create), which must win.
+function Methods.Play(self)
+	local props = rawget(self, "_props")
+	if type(props.Play) == "function" then
+		return props.Play(self)
+	end
+	props.Played = true
+end
+
+function Methods.GetPivot(self)
+	local props = rawget(self, "_props")
+	if props.CFrame then
+		return props.CFrame
+	end
+	local root = Methods.FindFirstChild(self, "HumanoidRootPart") or props.PrimaryPart
+	return if root then root.CFrame else CFrame.new()
+end
+
+-- Deep copy: properties, attributes and tags; PrimaryPart is remapped.
+function Methods.Clone(self)
+	local map = {}
+	local function copy(node)
+		local props = rawget(node, "_props")
+		local clone = new(props.ClassName)
+		map[node] = clone
+		for key, value in props do
+			if key ~= "Parent" and key ~= "PrimaryPart" then
+				rawget(clone, "_props")[key] = value
+			end
+		end
+		for key, value in rawget(node, "_attributes") do
+			rawget(clone, "_attributes")[key] = value
+		end
+		for _, child in rawget(node, "_children") do
+			copy(child).Parent = clone
+		end
+		return clone
+	end
+	local result = copy(self)
+	for original, clone in map do
+		local primary = rawget(original, "_props").PrimaryPart
+		if primary and map[primary] then
+			rawget(clone, "_props").PrimaryPart = map[primary]
+		end
+	end
+	return result
+end
+
 function Methods.PivotTo(self, cframe)
 	local root = Methods.FindFirstChild(self, "HumanoidRootPart") or rawget(self, "_props").PrimaryPart
 	if root then
@@ -501,10 +572,17 @@ end
 local UserInputService = service("UserInputService")
 rawget(UserInputService, "_props").TouchEnabled = false
 rawget(UserInputService, "_props").KeyboardEnabled = true
+function Methods.GetMouseLocation()
+	return roblox.Vector2.new(640, 360)
+end
+function Methods.ViewportPointToRay(_, _x, _y)
+	return { Origin = Vector3.new(0, 10, 0), Direction = Vector3.new(0, 0, -1) }
+end
 function Methods.GetLastInputType()
 	return roblox.Enum.UserInputType.Keyboard
 end
 local ContextActionService = service("ContextActionService")
+rawget(service("ProximityPromptService"), "_props").Enabled = true
 Mock.boundActions = {}
 function Methods.BindAction(self, name, fn)
 	Mock.boundActions[name] = fn
@@ -557,6 +635,8 @@ local function buildCharacter(player)
 		Parent = character,
 	})
 	rawget(character, "_props").PrimaryPart = root
+	local head = new("Part", { Name = "Head", Transparency = 0, Parent = character })
+	new("Decal", { Name = "face", Transparency = 0, Parent = head })
 	new("Humanoid", { Name = "Humanoid", Parent = character })
 	return character
 end

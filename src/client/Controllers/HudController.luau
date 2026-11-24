@@ -42,6 +42,7 @@ local ui = {} :: {
 	objectiveBody: TextLabel,
 	statsOperatives: TextLabel,
 	statsExtracted: TextLabel,
+	statsGenerators: TextLabel,
 	statsMimics: TextLabel,
 }
 
@@ -235,14 +236,26 @@ local function build()
 		}, "MonoBold")
 	end
 	ui.statsOperatives = statRow("Operatives", "OPERATIVES", 4)
-	ui.statsExtracted = statRow("Extracted", "EXTRACTED", 5)
-	ui.statsMimics = statRow("Mimics", "MIMICS AT START", 6)
+	ui.statsGenerators = statRow("Generators", "GENERATORS", 5)
+	ui.statsExtracted = statRow("Extracted", "EXTRACTED", 6)
+	ui.statsMimics = statRow("Mimics", "MIMICS AT START", 7)
+end
+
+-- Generators still needed before the lift has power (0 once restored).
+local function generatorsNeeded(): number
+	if StateController.getPublic("PowerRestored") == true then
+		return 0
+	end
+	local need = StateController.getPublic("GeneratorsRequired") or 0
+	local online = StateController.getPublic("GeneratorsOnline") or 0
+	return math.max(0, need - online)
 end
 
 local function objectiveText(): string
 	local role = StateController.getRole()
 	local phase = StateController.getPhase()
 	local required = StateController.getPublic("ExtractionRequired") or 0
+	local needed = generatorsNeeded()
 	if role == "Mimic" then
 		if phase == Phases.Deployment then
 			return "Blend in with the crew. Your abilities awaken when deployment ends."
@@ -253,10 +266,16 @@ local function objectiveText(): string
 	end
 	if phase == Phases.Deployment then
 		return "Spread out and learn the facility. Something is dormant inside your crew."
+	elseif phase == Phases.Active and needed > 0 then
+		return `Repair {needed} more generator(s) to power the lift. Watch who drifts away, and whose repairs never move the bar.`
 	elseif phase == Phases.Active then
 		return "Watch the crew. Notice who drifts away, who lingers near the missing, who never seems to be anywhere. Stay in pairs."
+	elseif phase == Phases.Escalation and needed > 0 then
+		return `Emergency power engaged. Restore {needed} more generator(s) or the lift never comes.`
 	elseif phase == Phases.Escalation then
 		return "Emergency power engaged. Regroup and make for the EXTRACTION LIFT south of the Central Atrium."
+	elseif phase == Phases.Extraction and needed > 0 then
+		return `The lift has no power. Restore {needed} more generator(s) and it opens at once.`
 	elseif phase == Phases.Extraction then
 		return `THE LIFT IS OPEN. Board it before it departs. {required} survivor(s) must escape.`
 	end
@@ -310,6 +329,16 @@ local function refreshObjective()
 	local required = StateController.getPublic("ExtractionRequired") or 0
 	ui.statsOperatives.Text = tostring(StateController.getPublic("OperativesRemaining") or 0)
 	ui.statsExtracted.Text = `{extracted} / {required}`
+	local generatorsRequired = StateController.getPublic("GeneratorsRequired") or 0
+	local generatorRow = ui.statsGenerators.Parent :: GuiObject
+	generatorRow.Visible = generatorsRequired > 0
+	ui.statsGenerators.Text = `{math.min(
+		StateController.getPublic("GeneratorsOnline") or 0,
+		generatorsRequired
+	)} / {generatorsRequired}`
+	ui.statsGenerators.TextColor3 = if StateController.getPublic("PowerRestored") == true
+		then Theme.Colors.Teal
+		else Theme.Colors.Text
 	ui.statsMimics.Text = tostring(StateController.getPublic("MimicCount") or 0)
 end
 

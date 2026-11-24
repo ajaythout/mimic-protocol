@@ -13,6 +13,7 @@
 
 local fs = require("@lune/fs")
 local process = require("@lune/process")
+local roblox = require("@lune/roblox")
 local serde = require("@lune/serde")
 local task = require("@lune/task")
 
@@ -36,6 +37,8 @@ for _, name in
 		"ClientReady",
 		"SetAfk",
 		"RequestStrike",
+		"RequestAbility",
+		"RequestSabotage",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -97,6 +100,79 @@ local emergencyLight =
 	Mock.new("PointLight", { Name = "Emergency", Brightness = 2, Enabled = false, Parent = facility })
 emergencyLight:AddTag("EmergencyLight")
 
+-- Prop library and placed props (Object Shift) ---------------------------------------------
+
+local assets = Mock.new("Folder", { Name = "Assets", Parent = ReplicatedStorage })
+local templates = Mock.new("Folder", { Name = "Props", Parent = assets })
+local function propModel(propId: string, displayName: string, transformable: boolean, at: Vector3, parent)
+	local model = Mock.new("Model", { Name = propId, Parent = parent })
+	local body =
+		Mock.new("Part", { Name = "Body", CFrame = CFrame.new(at + Vector3.new(0, 2, 0)), Parent = model })
+	Mock.new("Part", { Name = "Lid", CFrame = CFrame.new(at + Vector3.new(0, 4, 0)), Parent = model })
+	rawget(model, "_props").PrimaryPart = body
+	model:SetAttribute("PropId", propId)
+	model:SetAttribute("DisplayName", displayName)
+	model:SetAttribute("Transformable", transformable)
+	return model
+end
+propModel("WoodenCrate", "Wooden Crate", true, Vector3.zero, templates)
+propModel("Desk", "Desk", false, Vector3.zero, templates)
+local propsFolder = Mock.new("Folder", { Name = "Props", Parent = facility })
+local nearCrate = propModel("WoodenCrate", "Wooden Crate", true, Vector3.new(6, 0, 0), propsFolder)
+nearCrate:AddTag("MimicProp")
+local farCrate = propModel("WoodenCrate", "Wooden Crate", true, Vector3.new(100, 0, 0), propsFolder)
+farCrate:AddTag("MimicProp")
+-- Tagged by mistake but not transformable: the allowlist must reject it.
+local desk = propModel("Desk", "Desk", true, Vector3.new(-60, 0, 0), propsFolder)
+desk:AddTag("MimicProp")
+
+-- Generators (power objective) ---------------------------------------------------------------
+
+local generatorModels = {}
+for index, id in { "GEN-A", "GEN-B", "GEN-C" } do
+	local model = Mock.new("Model", { Name = "Generator", Parent = facility })
+	model:SetAttribute("GeneratorId", id)
+	model:SetAttribute("DisplayName", `GENERATOR {string.sub(id, -1)}`)
+	Mock.new("Part", { Name = "Panel", CFrame = CFrame.new(200 + index * 40, 3, 0), Parent = model })
+	Mock.new("Part", { Name = "Status", Parent = model })
+	local core = Mock.new("Part", { Name = "Core", Parent = model })
+	Mock.new("PointLight", { Name = "PointLight", Enabled = true, Parent = core })
+	model:AddTag("Generator")
+	generatorModels[id] = model
+end
+
+-- A room for sabotage: zone, one ceiling light, one doorway slab, the camera console --------
+
+local labZone = Mock.new("Part", {
+	Name = "Lab",
+	CFrame = CFrame.new(400, 6, 0),
+	Size = Vector3.new(40, 12, 40),
+	Parent = facility,
+})
+labZone:SetAttribute("DisplayName", "TEST LAB")
+labZone:AddTag("RoomZone")
+local labFixture = Mock.new("Part", {
+	Name = "Fixture",
+	CFrame = CFrame.new(400, 11, 0),
+	Material = roblox.Enum.Material.Neon,
+	Parent = facility,
+})
+local labLight =
+	Mock.new("PointLight", { Name = "PointLight", Enabled = true, Brightness = 1, Parent = labFixture })
+labLight:AddTag("FacilityLight")
+local labDoor = Mock.new("Part", {
+	Name = "LockdownDoor",
+	CFrame = CFrame.new(420, 3, 0),
+	Transparency = 1,
+	CanCollide = false,
+	Parent = facility,
+})
+labDoor:SetAttribute("Room", "TEST LAB")
+labDoor:AddTag("LockdownDoor")
+local cameraConsole =
+	Mock.new("Part", { Name = "CameraConsole", CFrame = CFrame.new(380, 3, 0), Parent = facility })
+cameraConsole:AddTag("CameraTerminal")
+
 -- Fast timings (every phase is clamped to >= 1 s by the server) -------------------------------
 
 local GameConfig = Mock.requireModule(shared.Config.GameConfig)
@@ -114,6 +190,23 @@ GameConfig.Strike.Cooldown = 1
 GameConfig.Players.MinStudio = 2
 -- The harness sets its own timings; a developer's Studio speed-up must not rescale them.
 GameConfig.Dev.FastRoundsInStudio = false
+GameConfig.ObjectShift.Cooldown = 0.5
+GameConfig.IdentityTheft.Cooldown = 0.5
+-- Earlier rounds predate the power objective; Round 9 switches it on.
+GameConfig.Generators.Required = 0
+GameConfig.Generators.RepairSeconds = 1
+GameConfig.Generators.TickInterval = 0.05
+GameConfig.Sabotage.InitialDelay = 0.3
+for _, kind in { "Lights", "Lockdown", "FalseAlert", "Generator", "Cameras" } do
+	GameConfig.Sabotage[kind].Cooldown = 0.3
+end
+GameConfig.Sabotage.Lights.Duration = 1.5
+-- The sabotage scenario fires faster than a player could; the limiter is not under test here.
+GameConfig.RateLimits.RequestSabotage = { Capacity = 50, RefillPerSecond = 50 }
+GameConfig.Sabotage.Lockdown.Duration = 0.5
+GameConfig.Sabotage.Cameras.Duration = 0.5
+GameConfig.Scanner.StunSeconds = 0.4
+GameConfig.Scanner.ExposeSeconds = 0.6
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -605,6 +698,617 @@ local ok, err = pcall(function()
 	end
 	waitForPhase("Deployment", 15)
 	check(true, "next round deploys normally after recovery")
+	-- The ability rounds run many steps inside Active; give them room so a
+	-- loaded machine cannot push a step past the end of the phase.
+	GameConfig.Timings.Active = 10
+
+	-- ===================================================================================
+	section("Round 7: Object Shift")
+	local Shifts = Mock.requireModule(serverFolder.Services.MimicAbilityService)
+	local everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	local mimic = mimics[1]
+	local function lastShift(player)
+		local found = nil
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "ObjectShift" then
+				found = args[1]
+			end
+		end
+		return found
+	end
+	local function shiftCount(player): number
+		local n = 0
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "ObjectShift" then
+				n += 1
+			end
+		end
+		return n
+	end
+	local function requestShift(player, target)
+		local before = shiftCount(player)
+		fire("RequestAbility", player, "ObjectShift", target)
+		waitUntil(function()
+			return shiftCount(player) > before
+		end, 1)
+		return lastShift(player)
+	end
+	local function head(player)
+		return player.Character:FindFirstChild("Head")
+	end
+
+	check(requestShift(mimic, nearCrate).result == "Locked", "Object Shift is dormant during Deployment")
+	waitForPhase("Active", 10)
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+
+	local before = shiftCount(survivors[1])
+	fire("RequestAbility", survivors[1], "ObjectShift", nearCrate)
+	task.wait(0.1)
+	check(shiftCount(survivors[1]) == before and not Shifts.isShifted(survivors[1]), "Survivors cannot shift")
+
+	local state = requestShift(mimic, nearCrate)
+	local humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(
+		state.result == "Shifted" and state.detail == "Wooden Crate" and (state.activeUntil or 0) > 0,
+		`Mimic shifts into the aimed prop (got {state.result})`
+	)
+	check(
+		mimic.Character:FindFirstChild("Disguise") ~= nil
+			and head(mimic).Transparency == 1
+			and head(mimic).face.Transparency == 1,
+		"character hidden and the prop clone attached"
+	)
+	check(
+		humanoid.WalkSpeed == GameConfig.ObjectShift.WalkSpeed
+			and humanoid.JumpHeight == 0
+			and humanoid.DisplayDistanceType == roblox.Enum.HumanoidDisplayDistanceType.None,
+		"movement restricted and name plate hidden while disguised"
+	)
+
+	state = requestShift(mimic, nil)
+	check(state.result == "Reverted", `asking again drops the disguise (got {state.result})`)
+	check(
+		mimic.Character:FindFirstChild("Disguise") == nil
+			and head(mimic).Transparency == 0
+			and head(mimic).face.Transparency == 0
+			and humanoid.WalkSpeed == GameConfig.Characters.WalkSpeed
+			and humanoid.DisplayDistanceType == roblox.Enum.HumanoidDisplayDistanceType.Viewer,
+		"appearance, movement and name plate restored"
+	)
+	check(requestShift(mimic, nearCrate).result == "Cooldown", "cooldown starts when the disguise ends")
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+
+	root(mimic).CFrame = CFrame.new(-60, 3, 5)
+	check(
+		requestShift(mimic, desk).result == "NoTarget",
+		"a prop without a transformable template is rejected"
+	)
+	check(requestShift(mimic, farCrate).result == "NoTarget", "a prop out of range is rejected")
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	GameConfig.ObjectShift.MaxDuration = 0.4
+	check(requestShift(mimic, nil).result == "Shifted", "without a hint the server picks the nearest prop")
+	check(waitUntil(function()
+		local last = lastShift(mimic)
+		return last.result == "Expired"
+	end, 2) and head(mimic).Transparency == 0, "the disguise drops on its own after MaxDuration")
+	GameConfig.ObjectShift.MaxDuration = 30
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+
+	check(requestShift(mimic, nearCrate).result == "Shifted", "shifted again")
+	placeInFront(mimic, survivors[1], 2.5)
+	fire("RequestStrike", mimic)
+	check(
+		waitUntil(function()
+			return status(survivors[1]) == "Eliminated"
+		end)
+			and lastShift(mimic).result == "Revealed"
+			and mimic.Character:FindFirstChild("Disguise") == nil,
+		"assimilating from a disguise breaks it"
+	)
+
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "shifted before the round ends")
+	waitForPhase("Results", 15)
+	check(
+		not Shifts.isShifted(mimic)
+			and (mimic.Character == nil or mimic.Character:FindFirstChild("Disguise") == nil),
+		"round end clears every disguise"
+	)
+
+	-- ===================================================================================
+	section("Round 8: Identity Theft")
+	local function lastTheft(player)
+		local found = nil
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "IdentityTheft" then
+				found = args[1]
+			end
+		end
+		return found
+	end
+	local function theftCount(player): number
+		local n = 0
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "IdentityTheft" then
+				n += 1
+			end
+		end
+		return n
+	end
+	local function requestTheft(player)
+		local before = theftCount(player)
+		fire("RequestAbility", player, "IdentityTheft")
+		waitUntil(function()
+			return theftCount(player) > before
+		end, 1)
+		return lastTheft(player)
+	end
+	local function look(player): string?
+		local h = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		return h and h:GetAppliedDescription():GetAttribute("Look")
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(requestTheft(mimic).result == "Locked", "Identity Theft is dormant during Deployment")
+	waitForPhase("Active", 10)
+
+	before = theftCount(survivors[1])
+	fire("RequestAbility", survivors[1], "IdentityTheft")
+	task.wait(0.1)
+	check(theftCount(survivors[1]) == before, "Survivors cannot impersonate")
+
+	root(mimic).CFrame = CFrame.new(300, 3, 300)
+	check(requestTheft(mimic).result == "NoTarget", "nobody in reach: no target")
+
+	local ownLook = look(mimic)
+	placeInFront(mimic, survivors[1], 4)
+	state = requestTheft(mimic)
+	humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(
+		state.result == "Copied" and state.detail == survivors[1].DisplayName and (state.activeUntil or 0) > 0,
+		`Mimic copies the survivor in front (got {state.result})`
+	)
+	check(
+		look(mimic) == survivors[1].Name and humanoid.DisplayName == survivors[1].DisplayName,
+		"appearance and display name both copied"
+	)
+	check(Shifts.isImpersonating(mimic), "server tracks the impersonation")
+
+	state = requestTheft(mimic)
+	check(state.result == "Restored", `asking again ends it early (got {state.result})`)
+	check(waitUntil(function()
+		return look(mimic) == ownLook
+	end, 1) and humanoid.DisplayName == "", "own appearance and name restored")
+	check(requestTheft(mimic).result == "Cooldown", "cooldown runs from activation")
+	task.wait(GameConfig.IdentityTheft.Cooldown + 0.1)
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "disguised as a prop first")
+	placeInFront(mimic, survivors[1], 4)
+	GameConfig.IdentityTheft.Duration = 0.4
+	check(requestTheft(mimic).result == "Copied", "impersonating from a prop disguise works")
+	check(
+		not Shifts.isShifted(mimic) and mimic.Character:FindFirstChild("Disguise") == nil,
+		"taking a new identity drops the prop disguise"
+	)
+	check(waitUntil(function()
+		return lastTheft(mimic).result == "Expired"
+	end, 2) and waitUntil(function()
+		return look(mimic) == ownLook
+	end, 1), "the impersonation fades after Duration")
+	GameConfig.IdentityTheft.Duration = 30
+	task.wait(GameConfig.IdentityTheft.Cooldown + 0.1)
+
+	placeInFront(mimic, survivors[1], 4)
+	check(requestTheft(mimic).result == "Copied", "impersonating when the round ends")
+	waitForPhase("Results", 15)
+	check(not Shifts.isImpersonating(mimic), "round end clears every impersonation")
+	GameConfig.Generators.Required = 2
+	GameConfig.Timings.Active = 5
+
+	-- ===================================================================================
+	section("Round 9: generator repair gates the lift")
+	local genA, genB, genC = generatorModels["GEN-A"], generatorModels["GEN-B"], generatorModels["GEN-C"]
+	local function prompt(model)
+		return model.Panel:FindFirstChild("RepairPrompt")
+	end
+	local function standAt(player, model)
+		root(player).CFrame = model.Panel.CFrame * CFrame.new(0, 0, 3)
+	end
+	local function progress(model): number
+		return model:GetAttribute("Progress") or 0
+	end
+	local function announced(player, title: string): boolean
+		for _, args in Mock.sent(player, "Announcement") do
+			if args[1].title == title then
+				return true
+			end
+		end
+		return false
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(
+		roundState:GetAttribute("GeneratorsRequired") == 2
+			and roundState:GetAttribute("GeneratorsOnline") == 0
+			and roundState:GetAttribute("PowerRestored") == false,
+		"round starts with every generator offline and power required"
+	)
+	check(
+		prompt(genA) ~= nil and prompt(genA).ActionText == "REPAIR",
+		"each generator panel has a REPAIR prompt"
+	)
+
+	standAt(survivors[1], genA)
+	prompt(genA).Triggered:Fire(survivors[1])
+	standAt(mimic, genB)
+	prompt(genB).Triggered:Fire(mimic)
+	task.wait(0.1)
+	check(
+		survivors[1]:GetAttribute("Repairing") == "GEN-A" and mimic:GetAttribute("Repairing") == "GEN-B",
+		"survivors and Mimics both show as repairing (no role tell)"
+	)
+	check(
+		waitUntil(function()
+			return genA:GetAttribute("Online") == true
+		end, 3),
+		"a survivor brings a generator online"
+	)
+	check(
+		roundState:GetAttribute("GeneratorsOnline") == 1
+			and survivors[1]:GetAttribute("Repairing") == nil
+			and prompt(genA).Enabled == false,
+		"online generator counted, its repairer released and its prompt disabled"
+	)
+	check(
+		progress(genB) == 0 and mimic:GetAttribute("Repairing") == "GEN-B",
+		"a Mimic's fake repair adds nothing"
+	)
+
+	standAt(survivors[2], genC)
+	prompt(genC).Triggered:Fire(survivors[2])
+	task.wait(0.2)
+	root(survivors[2]).CFrame = CFrame.new(-300, 3, 0)
+	check(
+		waitUntil(function()
+			return survivors[2]:GetAttribute("Repairing") == nil
+		end, 1),
+		"walking away stops a repair"
+	)
+	local kept = progress(genC)
+	task.wait(0.2)
+	check(kept > 0 and progress(genC) == kept, "progress is kept but stops when nobody works on it")
+	prompt(genB).Triggered:Fire(mimic)
+	task.wait(0.1)
+	check(mimic:GetAttribute("Repairing") == nil, "triggering again stops repairing")
+
+	waitForPhase("Extraction", 15)
+	task.wait(0.1)
+	check(roundState:GetAttribute("ExtractionOpen") == false, "the lift stays shut without power")
+	check(announced(survivors[1], "LIFT WITHOUT POWER"), "players are told the lift needs power")
+
+	standAt(survivors[2], genC)
+	standAt(survivors[3] or survivors[1], genC)
+	prompt(genC).Triggered:Fire(survivors[2])
+	prompt(genC).Triggered:Fire(survivors[3] or survivors[1])
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("PowerRestored") == true
+		end, 2),
+		"the second generator restores power"
+	)
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("ExtractionOpen") == true
+		end, 1),
+		"restoring power mid-Extraction opens the lift at once"
+	)
+	for _, s in survivors do
+		if status(s) == "Alive" then
+			root(s).CFrame = liftZone.CFrame
+		end
+	end
+	waitForPhase("Results", 10)
+	result = lastResult(players[1])
+	check(
+		result and result.winner == "Survivors",
+		`survivors escape once power is back (got {result and result.reason})`
+	)
+
+	-- ===================================================================================
+	section("Round 10: the lift never gets power")
+	waitForPhase("Deployment", 15)
+	check(
+		roundState:GetAttribute("GeneratorsOnline") == 0
+			and progress(genA) == 0
+			and genA:GetAttribute("Online") == false,
+		"generators reset between rounds"
+	)
+	waitForPhase("Results", 20)
+	result = lastResult(players[1])
+	check(
+		result and result.winner == "Mimics" and result.reason == "PowerFailure",
+		`no power means Mimics win by PowerFailure (got {result and result.reason})`
+	)
+	GameConfig.Generators.Required = 0
+	GameConfig.Timings.Active = 10
+
+	-- ===================================================================================
+	section("Round 11: System Sabotage")
+	local function sabotageStates(player, kind)
+		local list = {}
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "Sabotage" and args[1].detail == kind then
+				table.insert(list, args[1])
+			end
+		end
+		return list
+	end
+	local function requestSabotage(player, kind)
+		local before = #sabotageStates(player, kind)
+		fire("RequestSabotage", player, kind)
+		waitUntil(function()
+			return #sabotageStates(player, kind) > before
+		end, 1)
+		local list = sabotageStates(player, kind)
+		return list[#list] or {}
+	end
+	local function lastSabotageResult(player, kind)
+		-- The requester's reply (with a result) can be followed by the team-wide broadcast.
+		local list = sabotageStates(player, kind)
+		for i = #list, 1, -1 do
+			if list[i].result then
+				return list[i].result
+			end
+		end
+		return nil
+	end
+	local function sabotage(player, kind)
+		requestSabotage(player, kind)
+		task.wait(0.05)
+		return lastSabotageResult(player, kind)
+	end
+	local function bannerFor(player, title: string): boolean
+		for _, args in Mock.sent(player, "Announcement") do
+			if args[1].title == title then
+				return true
+			end
+		end
+		return false
+	end
+	local cooldown = GameConfig.Sabotage.Lights.Cooldown + 0.05
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(sabotage(mimic, "Lights") == "Locked", "sabotage is dormant during Deployment")
+	waitForPhase("Active", 10)
+	task.wait(GameConfig.Sabotage.InitialDelay + 0.05)
+
+	before = #sabotageStates(survivors[1], "Lights")
+	fire("RequestSabotage", survivors[1], "Lights")
+	fire("RequestSabotage", mimic, "Nuke")
+	task.wait(0.1)
+	check(#sabotageStates(survivors[1], "Lights") == before, "Survivors cannot sabotage")
+	check(#sabotageStates(mimic, "Nuke") == 0, "unknown sabotage kinds are ignored")
+
+	-- Blackout
+	root(mimic).CFrame = CFrame.new(600, 3, 0)
+	check(sabotage(mimic, "Lights") == "NoTarget", "a blackout needs the Mimic inside a room")
+	root(mimic).CFrame = CFrame.new(400, 3, 5)
+	check(sabotage(mimic, "Lights") == "Done", "blackout accepted inside a room")
+	check(sabotage(mimic, "Lights") == "Cooldown", "the blackout cooldown is claimed")
+	if mimics[2] then
+		local shared = sabotageStates(mimics[2], "Lights")
+		check(#shared > 0 and shared[#shared].readyAt > 0, "sabotage cooldowns are shared with fellow Mimics")
+	end
+	task.wait(0.85)
+	check(
+		labLight.Enabled == false and labFixture.Material == roblox.Enum.Material.SmoothPlastic,
+		"the room's lights flicker and go dark"
+	)
+	check(waitUntil(function()
+		return labLight.Enabled == true
+	end, 1) and labFixture.Material == roblox.Enum.Material.Neon, "the lights come back after the blackout")
+
+	-- Lockdown
+	root(mimic).CFrame = CFrame.new(600, 3, 0)
+	task.wait(cooldown)
+	check(sabotage(mimic, "Lockdown") == "NoTarget", "a lockdown needs a doorway within range")
+	root(mimic).CFrame = CFrame.new(410, 3, 0)
+	task.wait(cooldown)
+	check(sabotage(mimic, "Lockdown") == "Done", "lockdown accepted near a doorway")
+	check(
+		labDoor.CanCollide == true and labDoor.Transparency < 1,
+		"the doorway is sealed (solid and visible)"
+	)
+	check(bannerFor(survivors[1], "LOCKDOWN"), "everyone is told about the lockdown")
+	check(waitUntil(function()
+		return labDoor.CanCollide == false
+	end, 1) and labDoor.Transparency == 1, "the doorway reopens after the lockdown")
+
+	-- False alert
+	local operatives = roundState:GetAttribute("OperativesRemaining")
+	local fxBefore = #Mock.sent(survivors[1], "EliminationFx")
+	task.wait(cooldown)
+	check(sabotage(mimic, "FalseAlert") == "Done", "false alert accepted")
+	local faked = nil
+	for _, args in Mock.sent(survivors[1], "Announcement") do
+		local title = args[1].title
+		if string.find(title, "is no longer responding", 1, true) then
+			faked = title
+		end
+	end
+	local namesSurvivor = false
+	for _, s in survivors do
+		if faked == `{s.DisplayName} is no longer responding` and status(s) == "Alive" then
+			namesSurvivor = true
+		end
+	end
+	check(namesSurvivor, `the fake alert names a living survivor (got {faked})`)
+	check(
+		roundState:GetAttribute("OperativesRemaining") == operatives
+			and #Mock.sent(survivors[1], "EliminationFx") == fxBefore,
+		"the tell: the operatives count does not drop and there is no elimination effect"
+	)
+
+	-- Generator fault
+	local genA = generatorModels["GEN-A"]
+	local panel = genA.Panel
+	root(survivors[1]).CFrame = panel.CFrame * CFrame.new(0, 0, 3)
+	panel.RepairPrompt.Triggered:Fire(survivors[1])
+	waitUntil(function()
+		return (genA:GetAttribute("Progress") or 0) >= 0.4
+	end, 2)
+	panel.RepairPrompt.Triggered:Fire(survivors[1])
+	task.wait(0.1)
+	local damaged = genA:GetAttribute("Progress")
+	root(mimic).CFrame = CFrame.new(0, 3, 300)
+	task.wait(cooldown)
+	check(
+		sabotage(mimic, "Generator") == "NoTarget",
+		"a generator fault needs the Mimic at a damaged generator"
+	)
+	root(mimic).CFrame = panel.CFrame * CFrame.new(0, 0, 4)
+	check(sabotage(mimic, "Generator") == "Done", "generator fault accepted at the panel")
+	check(
+		math.abs(genA:GetAttribute("Progress") - (damaged - GameConfig.Sabotage.Generator.Setback)) < 0.01,
+		`repairs set back by {GameConfig.Sabotage.Generator.Setback} (from {damaged} to {genA:GetAttribute(
+			"Progress"
+		)})`
+	)
+	check(bannerFor(survivors[1], "GENERATOR A FAULT"), "the fault is announced")
+
+	-- Cameras
+	task.wait(cooldown)
+	check(sabotage(mimic, "Cameras") == "Done", "camera cut accepted")
+	check(roundState:GetAttribute("CamerasOnline") == false, "the camera feed goes dark")
+	task.wait(cooldown)
+	check(sabotage(mimic, "Cameras") == "NoTarget", "cameras that are already down cannot be cut again")
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("CamerasOnline") == true
+		end, 1),
+		"cameras come back after the outage"
+	)
+
+	-- Everything still active is undone at round end.
+	task.wait(cooldown)
+	root(mimic).CFrame = CFrame.new(400, 3, 5)
+	GameConfig.Sabotage.Lights.Duration = 30
+	GameConfig.Sabotage.Cameras.Duration = 30
+	check(
+		sabotage(mimic, "Lights") == "Done" and sabotage(mimic, "Cameras") == "Done",
+		"long sabotages started"
+	)
+	waitForPhase("Results", 15)
+	task.wait(0.1)
+	check(
+		labLight.Enabled == true and roundState:GetAttribute("CamerasOnline") == true,
+		"round end restores lights and cameras"
+	)
+
+	-- ===================================================================================
+	section("Round 12: Containment Scanner")
+	local function scanStates(player)
+		local list = {}
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "Scan" then
+				table.insert(list, args[1])
+			end
+		end
+		return list
+	end
+	local function lastScan(player)
+		local list = scanStates(player)
+		return list[#list] or {}
+	end
+	local function requestScan(player)
+		local before = #scanStates(player)
+		fire("RequestAbility", player, "Scan")
+		waitUntil(function()
+			return #scanStates(player) > before
+		end, 1)
+		return lastScan(player)
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	local scannerA, scannerB = survivors[1], survivors[2]
+	local mimicScansBefore = #scanStates(mimic) -- from rounds where this player was a survivor
+	check(requestScan(scannerA).result == "Locked", "the scanner is offline during Deployment")
+	waitForPhase("Active", 10)
+	task.wait(0.1)
+	check(
+		lastScan(scannerA).charges == GameConfig.Scanner.Charges,
+		"each survivor gets their charge when Active starts"
+	)
+	check(#scanStates(mimic) == mimicScansBefore, "Mimics never get a scanner")
+
+	root(scannerA).CFrame = CFrame.new(300, 3, 300)
+	state = requestScan(scannerA)
+	check(state.result == "NoTarget" and state.charges == 1, "a scan that finds nobody costs nothing")
+
+	placeInFront(scannerA, scannerB, 3)
+	state = requestScan(scannerA)
+	check(state.result == "Clear" and state.charges == 0, "scanning a crewmate spends the charge")
+	check(bannerFor(scannerB, "FALSE POSITIVE"), "everyone hears about the false positive")
+	check(requestScan(scannerA).result == "Spent", "no charge, no scan")
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "the Mimic hides as a prop")
+	root(scannerA).CFrame = CFrame.new(-300, 3, 300) -- out of the way
+	placeInFront(scannerB, mimic, 3)
+	state = requestScan(scannerB)
+	humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(state.result == "Mimic", `a disguised Mimic can be scanned (got {state.result})`)
+	check(
+		not Shifts.isShifted(mimic) and mimic.Character:FindFirstChild("Disguise") == nil,
+		"the scan strips the disguise"
+	)
+	check(mimic.Character:FindFirstChild("Exposed") ~= nil, "the Mimic is highlighted for everyone")
+	check(humanoid.WalkSpeed == 0, "the Mimic is stunned")
+	check(bannerFor(scannerA, "ORGANISM EXPOSED"), "the exposure is announced")
+	placeInFront(mimic, scannerA, 2.5)
+	fire("RequestStrike", mimic)
+	check(waitUntil(function()
+		local last = lastAbility(mimic)
+		return last ~= nil and last.ability == "Assimilate" and last.result == "Stunned"
+	end, 1) and status(scannerA) == "Alive", "a stunned Mimic cannot assimilate")
+	check(
+		waitUntil(function()
+			return humanoid.WalkSpeed == GameConfig.Characters.WalkSpeed
+		end, 1),
+		"the stun wears off"
+	)
+	check(
+		waitUntil(function()
+			return mimic.Character:FindFirstChild("Exposed") == nil
+		end, 1),
+		"the highlight fades"
+	)
+
+	waitForPhase("Extraction", 20)
+	local window = roundState:GetAttribute("PhaseEndsAt") - Workspace:GetServerTimeNow()
+	local shortest = GameConfig.Timings.Extraction * GameConfig.Scanner.MinExtractionFraction
+	check(
+		window <= shortest + 0.2,
+		`the false positive shortened the lift window (got {string.format("%.2f", window)} s, floor {shortest} s)`
+	)
 end)
 
 if not ok then

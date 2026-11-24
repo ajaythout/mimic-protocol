@@ -15,13 +15,21 @@
 	     extraction requirement                   -> Mimics    ("Outnumbered")
 	  5. Extraction window closed:
 	       enough extracted                       -> Survivors ("Extracted")
+	       the lift never had power               -> Mimics    ("PowerFailure")
 	       otherwise                              -> Mimics    ("ExtractionFailed")
 	  6. Otherwise the round continues            -> nil
 ]]
 
 export type Winner = "Survivors" | "Mimics" | "None"
 
-export type Reason = "Abandoned" | "MimicsGone" | "Extracted" | "Overrun" | "Outnumbered" | "ExtractionFailed"
+export type Reason =
+	"Abandoned"
+	| "MimicsGone"
+	| "Extracted"
+	| "Overrun"
+	| "Outnumbered"
+	| "ExtractionFailed"
+	| "PowerFailure"
 
 export type Snapshot = {
 	mimicsActive: number, -- connected, not eliminated
@@ -31,6 +39,8 @@ export type Snapshot = {
 	survivorsDisconnected: number, -- left the server while still active
 	startingSurvivors: number,
 	extractionClosed: boolean,
+	-- False while the generators are still down; nil means not tracked (powered).
+	powerRestored: boolean?,
 }
 
 export type Rules = {
@@ -53,6 +63,7 @@ WinConditions.ReasonText = {
 	Overrun = "No survivors remain inside the facility.",
 	Outnumbered = "Too few survivors remain to complete extraction.",
 	ExtractionFailed = "The extraction window closed before enough survivors escaped.",
+	PowerFailure = "The generators were never restored, so the lift never came.",
 } :: { [string]: string }
 
 --[[
@@ -104,6 +115,9 @@ function WinConditions.evaluate(snapshot: Snapshot, rules: Rules): Outcome?
 	if snapshot.extractionClosed then
 		if snapshot.survivorsExtracted >= required then
 			return outcome("Survivors", "Extracted", required)
+		end
+		if snapshot.powerRestored == false then
+			return outcome("Mimics", "PowerFailure", required)
 		end
 		return outcome("Mimics", "ExtractionFailed", required)
 	end

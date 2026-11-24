@@ -4,13 +4,16 @@ Roblox social-deduction survival game. The full design brief lives with the owne
 
 ## Status
 - **Phase 1 (Playable Foundation): done and playtested in Studio** (2026-11-23). See the README's *Studio checklist* for what was verified and what was fixed.
+- **Phase 2 (Core Gameplay): done and playtested in Studio** (2026-11-24) on branch `phase-2-core-gameplay`: Object Shift, Identity Theft, generator repair gating the lift, System Sabotage (+ camera terminal), Containment Scanner. Not yet checked in the phone emulator: the 4-slot Mimic bar, sabotage menu and camera feed.
 
 ## Studio MCP testing notes
 - Server & Clients: the server and each client show up as separate MCP targets (`get_studio_state` says which is the server). Stop the session with Studio's stop button; MCP `start_stop_play(false)` doesn't end a multi-client test.
 - Rojo's toolbar button may be missing from the ribbon. Open its panel with `PluginGuiService["Rojo 7.4.4"].Enabled = true` from `execute_luau` (Edit).
 - Non-scriptable properties such as `TextChatService.ChatVersion` don't live-sync; rebuild the place (`rojo build`) and reopen it.
 - `execute_luau` has its own module cache, so it can't read server module state (roles etc.). Read roles from each client's HUD.
-- With `FastRoundsInStudio`, RoleReveal (1.75 s) and Results (3 s) are too short to catch with MCP screenshots. Use normal timings for those.
+- With `FastRoundsInStudio`, RoleReveal (1.75 s) and Results (3 s) are too short to catch with MCP screenshots. Use normal timings for those. Repairs (30 s), sabotage InitialDelay (20 s) and the strike's InitialCooldown (15 s) are not scaled.
+- `execute_luau` on the server can move characters (`PivotTo`) to stage a test; `user_keyboard_input` on a client drives real abilities and prompts (E triggers the nearest ProximityPrompt).
+- Stopping a multi-client test while the server sim runs makes the sim timing-sensitive rounds flaky; run `scripts/check.sh` with Studio idle.
 - Tool limits: chat between local test clients isn't delivered, and `user_mouse_input` doesn't produce taps under the device emulator (desktop clicks work).
 
 ## Source of truth
@@ -39,9 +42,9 @@ stylua src map                     # format
 - Props: one builder per prop in `map/lib/Props.luau`, used for both templates (`ReplicatedStorage.Assets.Props`) and placed copies (tagged `MimicProp`), so disguises match exactly.
 - When adding a feature, extend `tests/sim/run.luau` (server) or `tests/sim/client.luau` (UI) with scenarios for it.
 
-## Phase 2 plan (core gameplay)
+## Phase 2 (core gameplay): built as planned below
 1. **Object Shift:** Mimic picks a nearby `MimicProp`. The server validates it (tag, distance, cooldown, prop allowlist), hides the character, welds a clone of the `Assets/Props` template, and restricts movement. Restoring must work across death and round end.
 2. **Identity Theft:** apply the target's `HumanoidDescription` and `Humanoid.DisplayName` for a set duration, then restore the Mimic's own appearance (watch out for avatar loading on respawn).
 3. **System Sabotage:** lights, cameras, generator progress, false alerts, lockdown doors. Each has a cooldown, server validation, and a clear audio/visual tell. Extend `FacilityService`.
 4. **Generator repair** objective that gates opening the extraction lift (`ExtractionService.open`).
-5. **Containment Scanner** (survivor counterplay; recommended, **pending owner confirmation**): one charge per survivor per round, used at close range with line of sight. A Mimic hit is exposed to all for a few seconds and briefly stunned. A Survivor hit shortens the lift window for the whole team by about 10 s. Disguised Mimics can be scanned.
+5. **Containment Scanner** (survivor counterplay; confirmed by the owner and built): one charge per survivor per round, used at close range with line of sight. A Mimic hit is exposed to all for a few seconds and briefly stunned. A Survivor hit shortens the lift window for the whole team by about 10 s. Disguised Mimics can be scanned.

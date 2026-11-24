@@ -28,6 +28,8 @@ for _, name in
 		"ClientReady",
 		"SetAfk",
 		"RequestStrike",
+		"RequestAbility",
+		"RequestSabotage",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -210,6 +212,91 @@ local ok, err = pcall(function()
 	task.wait(0.05)
 	check(sentToServer("RequestStrike") == strikes + 1, "button press during cooldown is not sent")
 
+	check(
+		bar.Shift.Visible == true and Mock.boundActions.MimicShift ~= nil,
+		"Shift slot shown and bound for Mimic"
+	)
+	local shiftRequests = sentToServer("RequestAbility")
+	Mock.boundActions.MimicShift("MimicShift", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	local lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == shiftRequests + 1 and lastRequest.args[1] == "ObjectShift",
+		"Q sends an Object Shift request"
+	)
+	clientEvent("AbilityState", {
+		ability = "ObjectShift",
+		readyAt = 0,
+		cooldown = 10,
+		result = "Shifted",
+		detail = "Wooden Crate",
+		activeUntil = now() + 20,
+	})
+	task.wait(0.25)
+	check(bar.Feedback.Text == "DISGUISED AS WOODEN CRATE", `disguise feedback (got {bar.Feedback.Text})`)
+	check(bar.Shift.KeyHint.Text:find("DROP") ~= nil, "an active disguise offers to drop it")
+	task.wait(0.3)
+	Mock.boundActions.MimicShift("MimicShift", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == shiftRequests + 2 and lastRequest.args[2] == nil,
+		"Q while disguised asks to drop it (no target)"
+	)
+
+	check(
+		bar.Impersonate.Visible == true and Mock.boundActions.MimicImpersonate ~= nil,
+		"Impersonate slot shown"
+	)
+	Mock.boundActions.MimicImpersonate("MimicImpersonate", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		lastRequest.remote == "RequestAbility"
+			and lastRequest.args[1] == "IdentityTheft"
+			and lastRequest.args[2] == nil,
+		"R sends an intent-only Identity Theft request"
+	)
+	clientEvent("AbilityState", {
+		ability = "IdentityTheft",
+		readyAt = now() + 60,
+		cooldown = 60,
+		result = "Copied",
+		detail = "Ally",
+		activeUntil = now() + 45,
+	})
+	task.wait(0.25)
+	check(bar.Feedback.Text == "NOW APPEARING AS ALLY", `impersonation feedback (got {bar.Feedback.Text})`)
+
+	local sabotagePanel = gui.Sabotage.SabotagePanel
+	check(bar.Sabotage.Visible == true and sabotagePanel.Visible == false, "Sabotage slot shown, menu closed")
+	Mock.boundActions.MimicSabotage("MimicSabotage", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	check(
+		sabotagePanel.Visible == true and Mock.boundActions.SabotagePick ~= nil,
+		"G opens the sabotage menu"
+	)
+	Mock.boundActions.SabotagePick(
+		"SabotagePick",
+		roblox.Enum.UserInputState.Begin,
+		{ KeyCode = roblox.Enum.KeyCode.One }
+	)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		lastRequest.remote == "RequestSabotage"
+			and lastRequest.args[1] == "Lights"
+			and sabotagePanel.Visible == false,
+		"1 sends a blackout request and closes the menu"
+	)
+	clientEvent(
+		"AbilityState",
+		{ ability = "Sabotage", readyAt = now() + 60, cooldown = 60, result = "Done", detail = "Lights" }
+	)
+	task.wait(0.25)
+	check(bar.Feedback.Text == "BLACKOUT TRIGGERED", `sabotage feedback (got {bar.Feedback.Text})`)
+	check(bar.Assimilate.Countdown.Text ~= "60", "a sabotage cooldown does not leak onto other slots")
+
 	print("• location readout")
 	player.Character.HumanoidRootPart.CFrame = CFrame.new(5, 3, -90)
 	task.wait(0.6)
@@ -294,7 +381,45 @@ local ok, err = pcall(function()
 	check(gui.RoleReveal.Overlay.Center.Intel.Text == "2 MIMICS HIDE AMONG 8 CREW", "survivor intel line")
 	player:SetAttribute("Status", "Alive")
 	setPhase("Extraction", 20)
-	check(bar.Visible == false, "survivors have no Mimic ability bar")
+	check(
+		bar.Visible == true
+			and bar.Scan.Visible == true
+			and bar.Assimilate.Visible == false
+			and bar.Shift.Visible == false
+			and bar.Sabotage.Visible == false,
+		"survivors get only the scanner on the ability bar"
+	)
+	check(
+		Mock.boundActions.SurvivorScan ~= nil and Mock.boundActions.MimicAssimilate == nil,
+		"F is bound to Scan, not Assimilate"
+	)
+	clientEvent("AbilityState", { ability = "Scan", readyAt = 0, cooldown = 1, charges = 1 })
+	task.wait(0.25)
+	check(bar.Scan.KeyHint.Text:find("x1") ~= nil, `scanner shows its charge (got {bar.Scan.KeyHint.Text})`)
+	local scans = sentToServer("RequestAbility")
+	Mock.boundActions.SurvivorScan("SurvivorScan", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	local scanRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == scans + 1
+			and scanRequest.args[1] == "Scan"
+			and scanRequest.args[2] == nil,
+		"F sends an intent-only scan"
+	)
+	clientEvent(
+		"AbilityState",
+		{ ability = "Scan", readyAt = 0, cooldown = 1, charges = 0, result = "Clear" }
+	)
+	task.wait(0.25)
+	check(
+		bar.Feedback.Text == "CREWMATE: FALSE POSITIVE" and bar.Scan.KeyHint.Text == "SPENT",
+		"a spent scanner says so"
+	)
+	task.wait(0.35)
+	scans = sentToServer("RequestAbility")
+	Mock.boundActions.SurvivorScan("SurvivorScan", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	check(sentToServer("RequestAbility") == scans, "a spent scanner sends nothing")
 	check(
 		gui.Hud.Objective.Content.Body.Text:find("THE LIFT IS OPEN") ~= nil,
 		"survivor extraction objective"
