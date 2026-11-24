@@ -1,0 +1,187 @@
+{
+  "name": "TheMimicProtocol",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Assets": {
+        "$className": "Folder",
+        "Props": {
+          "$path": "build/PropLibrary.rbxm"
+        }
+      },
+      "Remotes": {
+        "$className": "Folder",
+        "ClientReady": { "$className": "RemoteEvent" },
+        "SetAfk": { "$className": "RemoteEvent" },
+        "RequestStrike": { "$className": "RemoteEvent" },
+        "PrivateState": { "$className": "RemoteEvent" },
+        "RoleReveal": { "$className": "RemoteEvent" },
+        "AbilityState": { "$className": "RemoteEvent" },
+        "Announcement": { "$className": "RemoteEvent" },
+        "EliminationFx": { "$className": "RemoteEvent" },
+        "RoundResult": { "$className": "RemoteEvent" }
+      },
+      "RoundState": {
+        "$className": "Folder",
+        "$attributes": {
+          "Phase": "Waiting",
+          "PhaseEndsAt": 0,
+          "RoundId": 0,
+          "RequiredPlayers": 4,
+          "EligiblePlayers": 0,
+          "OperativesRemaining": 0,
+          "SurvivorsExtracted": 0,
+          "ExtractionRequired": 0,
+          "ExtractionOpen": false,
+          "MimicCount": 0
+        }
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$properties": {
+        "CharacterWalkSpeed": 16,
+        "CharacterUseJumpPower": false,
+        "CharacterJumpHeight": 6,
+        "CameraMaxZoomDistance": 16,
+        "CameraMinZoomDistance": 0.5,
+        "LoadCharacterAppearance": true,
+        "AutoJumpEnabled": true,
+        "EnableMouseLockOption": true
+      },
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": {
+          "$path": "src/client"
+        }
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$properties": {
+        "ResetPlayerGuiOnSpawn": false
+      }
+    },
+
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "CharacterAutoLoads": false,
+        "RespawnTime": 3
+      }
+    },
+
+    "Teams": {
+      "$className": "Teams",
+      "Standby": {
+        "$className": "Team",
+        "$properties": {
+          "TeamColor": { "BrickColor": 194 },
+          "AutoAssignable": true
+        }
+      },
+      "Operatives": {
+        "$className": "Team",
+        "$properties": {
+          "TeamColor": { "BrickColor": 1013 },
+          "AutoAssignable": false
+        }
+      },
+      "Observers": {
+        "$className": "Team",
+        "$properties": {
+          "TeamColor": { "BrickColor": 199 },
+          "AutoAssignable": false
+        }
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "Gravity": 196.2,
+        "StreamingEnabled": false
+      },
+      "Facility": {
+        "$path": "build/Facility.rbxm"
+      },
+      "DeploymentBay": {
+        "$path": "build/DeploymentBay.rbxm"
+      }
+    },
+
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "ShadowMap",
+        "Ambient": [0.13, 0.145, 0.19],
+        "OutdoorAmbient": [0.09, 0.1, 0.13],
+        "Brightness": 0.6,
+        "ClockTime": 0,
+        "GlobalShadows": true,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.7,
+        "ExposureCompensation": 0.15,
+        "ColorShift_Top": [0, 0, 0],
+        "ColorShift_Bottom": [0, 0, 0],
+        "FogColor": [0.04, 0.05, 0.07],
+        "FogStart": 0,
+        "FogEnd": 100000
+      },
+      "FacilityAtmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Density": 0.28,
+          "Offset": 0,
+          "Color": [0.16, 0.19, 0.25],
+          "Decay": [0.05, 0.06, 0.09],
+          "Glare": 0,
+          "Haze": 1.2
+        }
+      },
+      "FacilityGrade": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": {
+          "Brightness": 0.02,
+          "Contrast": 0.12,
+          "Saturation": -0.12,
+          "TintColor": [0.94, 0.97, 1.0]
+        }
+      },
+      "FacilityBloom": {
+        "$className": "BloomEffect",
+        "$properties": {
+          "Intensity": 0.55,
+          "Size": 22,
+          "Threshold": 1.4
+        }
+      }
+    },
+
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": {
+        "AmbientReverb": "Hangar",
+        "RolloffScale": 1
+      }
+    },
+
+    "TextChatService": {
+      "$className": "TextChatService"
+    }
+  }
+}
