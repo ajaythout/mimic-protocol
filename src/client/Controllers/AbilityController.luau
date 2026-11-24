@@ -7,6 +7,7 @@
 	slots are shown and bound.
 
 	  Mimic   ASSIMILATE [F / ButtonX]   SHIFT [Q / ButtonY]   IMPERSONATE [R / ButtonB]
+	          SABOTAGE [G / DPadUp] opens the sabotage menu (SabotageController)
 
 	The client only sends intent. Cooldowns and active timers come from the
 	server's AbilityState messages; nothing is trusted from local timing. For
@@ -26,6 +27,7 @@ local Phases = require(Shared.Modules.Phases)
 
 local Components = require(script.Parent.Parent.UI.Components)
 local Theme = require(script.Parent.Parent.UI.Theme)
+local SabotageController = require(script.Parent.SabotageController)
 local StateController = require(script.Parent.StateController)
 
 local AbilityController = {}
@@ -107,6 +109,24 @@ local FEEDBACK: { [string]: { [string]: Feedback } } = {
 		NoTarget = { text = "NO ONE IN REACH", color = MUTED },
 		Failed = { text = "IMPERSONATION FAILED", color = MUTED },
 		Cooldown = { text = "RECHARGING", color = MUTED },
+		Locked = { text = "ORGANISM DORMANT", color = MUTED },
+	},
+	[Net.Abilities.Sabotage] = {
+		Done = {
+			text = function(detail: string?): string
+				local info = SabotageController.info(detail)
+				return `{if info then info.title else "SABOTAGE"} TRIGGERED`
+			end,
+			color = Theme.Colors.Red,
+		},
+		NoTarget = {
+			text = function(detail: string?): string
+				local info = SabotageController.info(detail)
+				return if info then info.noTarget else "NOTHING TO SABOTAGE"
+			end,
+			color = MUTED,
+		},
+		Cooldown = { text = "SYSTEM STILL RECOVERING", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
 	},
 }
@@ -485,6 +505,20 @@ local function build()
 			abilityRemote:FireServer(Net.Abilities.IdentityTheft)
 		end,
 	})
+	buildSlot({
+		id = Net.Abilities.Sabotage,
+		name = "Sabotage",
+		title = "SABOTAGE",
+		key = Enum.KeyCode.G,
+		pad = Enum.KeyCode.DPadUp,
+		action = "MimicSabotage",
+		accent = Theme.Colors.Blue,
+		role = "Mimic",
+		order = 4,
+		activate = function()
+			SabotageController.toggle()
+		end,
+	})
 	applyLayout()
 end
 
@@ -494,6 +528,16 @@ local function onAbilityState(payload: Net.AbilityStatePayload)
 	end
 	local slot = slotsById[payload.ability]
 	if not slot then
+		return
+	end
+	if payload.ability == Net.Abilities.Sabotage then
+		-- Per-kind cooldowns live in the sabotage menu, not on the slot.
+		SabotageController.onState(payload)
+		local entry = payload.result and FEEDBACK[payload.ability][payload.result]
+		if entry then
+			local text = entry.text
+			showFeedback(if type(text) == "function" then text(payload.detail) else text, entry.color)
+		end
 		return
 	end
 	slot.readyAt = tonumber(payload.readyAt) or 0

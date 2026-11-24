@@ -292,6 +292,11 @@ local function buildDoorFrames(model: any, room: Layout.Room, openings: { Openin
 		sideBox(model, "HeaderGlow", room, side, off, w - 1, h + 0.35, h + 0.65, 0.9, 1.0, S.NeonCyan)
 		-- Threshold plate
 		sideBox(model, "Threshold", room, side, off, w, 0, 0.08, -T, 0.6, S.Trim)
+		-- Lockdown slab (FacilityService): invisible and non-colliding until a
+		-- sabotage seals this doorway for a few seconds.
+		local slab = sideBox(model, "LockdownDoor", room, side, off, w, 0.08, h, 0.15, 0.55, S.Invisible)
+		B.tag(slab, "LockdownDoor")
+		B.attrs(slab, { Room = room.name, LeadsTo = opening.leadsTo.name })
 
 		-- Destination sign above the door, facing into the room.
 		local nx, nz = Architecture.inwardNormal(room, side)

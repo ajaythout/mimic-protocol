@@ -20,6 +20,7 @@
         "SetAfk": { "$className": "RemoteEvent" },
         "RequestStrike": { "$className": "RemoteEvent" },
         "RequestAbility": { "$className": "RemoteEvent" },
+        "RequestSabotage": { "$className": "RemoteEvent" },
         "PrivateState": { "$className": "RemoteEvent" },
         "RoleReveal": { "$className": "RemoteEvent" },
         "AbilityState": { "$className": "RemoteEvent" },
@@ -42,6 +43,7 @@
           "GeneratorsOnline": 0,
           "GeneratorsRequired": 0,
           "PowerRestored": false,
+          "CamerasOnline": true,
           "MimicCount": 0
         }
       }

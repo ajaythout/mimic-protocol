@@ -404,6 +404,16 @@ function Methods.ApplyDescription(self, description)
 	rawget(self, "_props").AppliedDescription = description
 end
 
+-- Sounds: playing is a no-op, but the call is recorded for tests. Tweens
+-- carry their own Play in _props (see Methods.Create), which must win.
+function Methods.Play(self)
+	local props = rawget(self, "_props")
+	if type(props.Play) == "function" then
+		return props.Play(self)
+	end
+	props.Played = true
+end
+
 function Methods.GetPivot(self)
 	local props = rawget(self, "_props")
 	if props.CFrame then
@@ -572,6 +582,7 @@ function Methods.GetLastInputType()
 	return roblox.Enum.UserInputType.Keyboard
 end
 local ContextActionService = service("ContextActionService")
+rawget(service("ProximityPromptService"), "_props").Enabled = true
 Mock.boundActions = {}
 function Methods.BindAction(self, name, fn)
 	Mock.boundActions[name] = fn

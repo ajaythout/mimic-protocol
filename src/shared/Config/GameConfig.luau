@@ -115,6 +115,25 @@ GameConfig.IdentityTheft = {
 	Cooldown = 60,
 }
 
+-- Mimic sabotage ------------------------------------------------------------
+-- Cooldowns are per kind and shared by every Mimic.
+GameConfig.Sabotage = {
+	-- Seconds into the Active phase before anything can be sabotaged.
+	InitialDelay = 20,
+	Lights = { Cooldown = 60, Duration = 20 },
+	Lockdown = { Cooldown = 45, Duration = 12, Range = 30 },
+	FalseAlert = { Cooldown = 50 },
+	-- Setback is the fraction of a full repair that is lost.
+	Generator = { Cooldown = 40, Range = 8, Setback = 0.25 },
+	Cameras = { Cooldown = 60, Duration = 30 },
+}
+
+-- Security camera terminal (Security Office) --------------------------------
+GameConfig.Cameras = {
+	-- Prompt distance; viewers who step further away leave the feed.
+	Range = 8,
+}
+
 -- Characters ----------------------------------------------------------------
 GameConfig.Characters = {
 	WalkSpeed = 16,
@@ -130,6 +149,7 @@ GameConfig.RateLimits = {
 	SetAfk = { Capacity = 3, RefillPerSecond = 0.5 },
 	RequestStrike = { Capacity = 4, RefillPerSecond = 2 },
 	RequestAbility = { Capacity = 4, RefillPerSecond = 1.5 },
+	RequestSabotage = { Capacity = 3, RefillPerSecond = 1 },
 }
 
 return GameConfig

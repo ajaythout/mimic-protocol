@@ -47,6 +47,7 @@ local MatchState = require(script.Parent.MatchState)
 local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
 local RoleService = require(script.Parent.RoleService)
+local SabotageService = require(script.Parent.SabotageService)
 
 local RoundService = {}
 
@@ -226,6 +227,7 @@ local function runRound(round: MatchState.Round)
 	MatchState.setPhase(Phases.Active, activeDuration)
 	EliminationService.primeCooldowns(GameConfig.Strike.InitialCooldown)
 	MimicAbilityService.primeCooldowns()
+	SabotageService.primeCooldowns()
 	Announcer.all("CONTAINMENT BREACH", "Something in this facility is not what it seems.", "Critical", 5)
 	mimicPlayers = {}
 	for _, mimic in MatchState.getActiveByRole("Mimic") do
@@ -353,6 +355,7 @@ local function finishRound(round: MatchState.Round)
 
 	step("environment", function()
 		MimicAbilityService.reset()
+		SabotageService.reset()
 		GeneratorService.reset()
 		ExtractionService.close()
 		FacilityService.setLightingMode("Normal")

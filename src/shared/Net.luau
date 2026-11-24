@@ -10,6 +10,8 @@
 	  RequestStrike  C->S  ()                       intent only; server picks target
 	  RequestAbility C->S  (ability, target?)       Mimic/Survivor abilities; target is
 	                                              a hint the server re-validates
+	  RequestSabotage C->S (kind)                   intent only; server picks the room,
+	                                              door or generator
 	  PrivateState   S->C  PrivateStatePayload      the receiving player's role
 	  RoleReveal     S->C  RoleRevealPayload        start-of-round reveal
 	  AbilityState   S->C  AbilityStatePayload      server-confirmed cooldowns
@@ -87,6 +89,7 @@ Net.Names = {
 	SetAfk = "SetAfk",
 	RequestStrike = "RequestStrike",
 	RequestAbility = "RequestAbility",
+	RequestSabotage = "RequestSabotage",
 	PrivateState = "PrivateState",
 	RoleReveal = "RoleReveal",
 	AbilityState = "AbilityState",
@@ -100,7 +103,11 @@ Net.Abilities = {
 	Assimilate = "Assimilate",
 	ObjectShift = "ObjectShift",
 	IdentityTheft = "IdentityTheft",
+	Sabotage = "Sabotage", -- AbilityState.detail names the kind
 }
+
+-- Sabotage kinds accepted by RequestSabotage (see SabotageService).
+Net.SabotageKinds = { "Lights", "Lockdown", "FalseAlert", "Generator", "Cameras" }
 
 local remotesFolder: Folder? = nil
 

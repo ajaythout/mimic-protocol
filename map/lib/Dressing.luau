@@ -423,6 +423,10 @@ builders.Security = function(ctx)
 	for _, x in { -7, 0, 7 } do
 		ctx.workstation(x, -14, 180, x == 0)
 	end
+	-- Camera console in front of the monitor wall: the VIEW CAMERAS prompt
+	-- (FacilityService) attaches to this invisible anchor.
+	local console = ctx.box("CameraConsole", V(2, 2, 1), 0, 3, -18.5, S.Invisible)
+	B.tag(console, "CameraTerminal")
 	ctx.prop("FilingCabinet", 24.5, -16, 90)
 	ctx.prop("FilingCabinet", 24.5, -12.8, 90)
 	ctx.prop("Locker", 24.5, 14, 90)

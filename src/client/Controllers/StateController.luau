@@ -113,6 +113,7 @@ function StateController.Start()
 			"GeneratorsOnline",
 			"GeneratorsRequired",
 			"PowerRestored",
+			"CamerasOnline",
 		}
 	do
 		roundState:GetAttributeChangedSignal(name):Connect(function()

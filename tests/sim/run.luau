@@ -38,6 +38,7 @@ for _, name in
 		"SetAfk",
 		"RequestStrike",
 		"RequestAbility",
+		"RequestSabotage",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -140,6 +141,38 @@ for index, id in { "GEN-A", "GEN-B", "GEN-C" } do
 	generatorModels[id] = model
 end
 
+-- A room for sabotage: zone, one ceiling light, one doorway slab, the camera console --------
+
+local labZone = Mock.new("Part", {
+	Name = "Lab",
+	CFrame = CFrame.new(400, 6, 0),
+	Size = Vector3.new(40, 12, 40),
+	Parent = facility,
+})
+labZone:SetAttribute("DisplayName", "TEST LAB")
+labZone:AddTag("RoomZone")
+local labFixture = Mock.new("Part", {
+	Name = "Fixture",
+	CFrame = CFrame.new(400, 11, 0),
+	Material = roblox.Enum.Material.Neon,
+	Parent = facility,
+})
+local labLight =
+	Mock.new("PointLight", { Name = "PointLight", Enabled = true, Brightness = 1, Parent = labFixture })
+labLight:AddTag("FacilityLight")
+local labDoor = Mock.new("Part", {
+	Name = "LockdownDoor",
+	CFrame = CFrame.new(420, 3, 0),
+	Transparency = 1,
+	CanCollide = false,
+	Parent = facility,
+})
+labDoor:SetAttribute("Room", "TEST LAB")
+labDoor:AddTag("LockdownDoor")
+local cameraConsole =
+	Mock.new("Part", { Name = "CameraConsole", CFrame = CFrame.new(380, 3, 0), Parent = facility })
+cameraConsole:AddTag("CameraTerminal")
+
 -- Fast timings (every phase is clamped to >= 1 s by the server) -------------------------------
 
 local GameConfig = Mock.requireModule(shared.Config.GameConfig)
@@ -163,6 +196,15 @@ GameConfig.IdentityTheft.Cooldown = 0.5
 GameConfig.Generators.Required = 0
 GameConfig.Generators.RepairSeconds = 1
 GameConfig.Generators.TickInterval = 0.05
+GameConfig.Sabotage.InitialDelay = 0.3
+for _, kind in { "Lights", "Lockdown", "FalseAlert", "Generator", "Cameras" } do
+	GameConfig.Sabotage[kind].Cooldown = 0.3
+end
+GameConfig.Sabotage.Lights.Duration = 1.5
+-- The sabotage scenario fires faster than a player could; the limiter is not under test here.
+GameConfig.RateLimits.RequestSabotage = { Capacity = 50, RefillPerSecond = 50 }
+GameConfig.Sabotage.Lockdown.Duration = 0.5
+GameConfig.Sabotage.Cameras.Duration = 0.5
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -654,6 +696,9 @@ local ok, err = pcall(function()
 	end
 	waitForPhase("Deployment", 15)
 	check(true, "next round deploys normally after recovery")
+	-- The ability rounds run many steps inside Active; give them room so a
+	-- loaded machine cannot push a step past the end of the phase.
+	GameConfig.Timings.Active = 10
 
 	-- ===================================================================================
 	section("Round 7: Object Shift")
@@ -864,6 +909,7 @@ local ok, err = pcall(function()
 	waitForPhase("Results", 15)
 	check(not Shifts.isImpersonating(mimic), "round end clears every impersonation")
 	GameConfig.Generators.Required = 2
+	GameConfig.Timings.Active = 5
 
 	-- ===================================================================================
 	section("Round 9: generator repair gates the lift")
@@ -993,6 +1039,183 @@ local ok, err = pcall(function()
 		`no power means Mimics win by PowerFailure (got {result and result.reason})`
 	)
 	GameConfig.Generators.Required = 0
+	GameConfig.Timings.Active = 10
+
+	-- ===================================================================================
+	section("Round 11: System Sabotage")
+	local function sabotageStates(player, kind)
+		local list = {}
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "Sabotage" and args[1].detail == kind then
+				table.insert(list, args[1])
+			end
+		end
+		return list
+	end
+	local function requestSabotage(player, kind)
+		local before = #sabotageStates(player, kind)
+		fire("RequestSabotage", player, kind)
+		waitUntil(function()
+			return #sabotageStates(player, kind) > before
+		end, 1)
+		local list = sabotageStates(player, kind)
+		return list[#list] or {}
+	end
+	local function lastSabotageResult(player, kind)
+		-- The requester's reply (with a result) can be followed by the team-wide broadcast.
+		local list = sabotageStates(player, kind)
+		for i = #list, 1, -1 do
+			if list[i].result then
+				return list[i].result
+			end
+		end
+		return nil
+	end
+	local function sabotage(player, kind)
+		requestSabotage(player, kind)
+		task.wait(0.05)
+		return lastSabotageResult(player, kind)
+	end
+	local function bannerFor(player, title: string): boolean
+		for _, args in Mock.sent(player, "Announcement") do
+			if args[1].title == title then
+				return true
+			end
+		end
+		return false
+	end
+	local cooldown = GameConfig.Sabotage.Lights.Cooldown + 0.05
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(sabotage(mimic, "Lights") == "Locked", "sabotage is dormant during Deployment")
+	waitForPhase("Active", 10)
+	task.wait(GameConfig.Sabotage.InitialDelay + 0.05)
+
+	before = #sabotageStates(survivors[1], "Lights")
+	fire("RequestSabotage", survivors[1], "Lights")
+	fire("RequestSabotage", mimic, "Nuke")
+	task.wait(0.1)
+	check(#sabotageStates(survivors[1], "Lights") == before, "Survivors cannot sabotage")
+	check(#sabotageStates(mimic, "Nuke") == 0, "unknown sabotage kinds are ignored")
+
+	-- Blackout
+	root(mimic).CFrame = CFrame.new(600, 3, 0)
+	check(sabotage(mimic, "Lights") == "NoTarget", "a blackout needs the Mimic inside a room")
+	root(mimic).CFrame = CFrame.new(400, 3, 5)
+	check(sabotage(mimic, "Lights") == "Done", "blackout accepted inside a room")
+	check(sabotage(mimic, "Lights") == "Cooldown", "the blackout cooldown is claimed")
+	if mimics[2] then
+		local shared = sabotageStates(mimics[2], "Lights")
+		check(#shared > 0 and shared[#shared].readyAt > 0, "sabotage cooldowns are shared with fellow Mimics")
+	end
+	task.wait(0.85)
+	check(
+		labLight.Enabled == false and labFixture.Material == roblox.Enum.Material.SmoothPlastic,
+		"the room's lights flicker and go dark"
+	)
+	check(waitUntil(function()
+		return labLight.Enabled == true
+	end, 1) and labFixture.Material == roblox.Enum.Material.Neon, "the lights come back after the blackout")
+
+	-- Lockdown
+	root(mimic).CFrame = CFrame.new(600, 3, 0)
+	task.wait(cooldown)
+	check(sabotage(mimic, "Lockdown") == "NoTarget", "a lockdown needs a doorway within range")
+	root(mimic).CFrame = CFrame.new(410, 3, 0)
+	task.wait(cooldown)
+	check(sabotage(mimic, "Lockdown") == "Done", "lockdown accepted near a doorway")
+	check(
+		labDoor.CanCollide == true and labDoor.Transparency < 1,
+		"the doorway is sealed (solid and visible)"
+	)
+	check(bannerFor(survivors[1], "LOCKDOWN"), "everyone is told about the lockdown")
+	check(waitUntil(function()
+		return labDoor.CanCollide == false
+	end, 1) and labDoor.Transparency == 1, "the doorway reopens after the lockdown")
+
+	-- False alert
+	local operatives = roundState:GetAttribute("OperativesRemaining")
+	local fxBefore = #Mock.sent(survivors[1], "EliminationFx")
+	task.wait(cooldown)
+	check(sabotage(mimic, "FalseAlert") == "Done", "false alert accepted")
+	local faked = nil
+	for _, args in Mock.sent(survivors[1], "Announcement") do
+		local title = args[1].title
+		if string.find(title, "is no longer responding", 1, true) then
+			faked = title
+		end
+	end
+	local namesSurvivor = false
+	for _, s in survivors do
+		if faked == `{s.DisplayName} is no longer responding` and status(s) == "Alive" then
+			namesSurvivor = true
+		end
+	end
+	check(namesSurvivor, `the fake alert names a living survivor (got {faked})`)
+	check(
+		roundState:GetAttribute("OperativesRemaining") == operatives
+			and #Mock.sent(survivors[1], "EliminationFx") == fxBefore,
+		"the tell: the operatives count does not drop and there is no elimination effect"
+	)
+
+	-- Generator fault
+	local genA = generatorModels["GEN-A"]
+	local panel = genA.Panel
+	root(survivors[1]).CFrame = panel.CFrame * CFrame.new(0, 0, 3)
+	panel.RepairPrompt.Triggered:Fire(survivors[1])
+	waitUntil(function()
+		return (genA:GetAttribute("Progress") or 0) >= 0.4
+	end, 2)
+	panel.RepairPrompt.Triggered:Fire(survivors[1])
+	task.wait(0.1)
+	local damaged = genA:GetAttribute("Progress")
+	root(mimic).CFrame = CFrame.new(0, 3, 300)
+	task.wait(cooldown)
+	check(
+		sabotage(mimic, "Generator") == "NoTarget",
+		"a generator fault needs the Mimic at a damaged generator"
+	)
+	root(mimic).CFrame = panel.CFrame * CFrame.new(0, 0, 4)
+	check(sabotage(mimic, "Generator") == "Done", "generator fault accepted at the panel")
+	check(
+		math.abs(genA:GetAttribute("Progress") - (damaged - GameConfig.Sabotage.Generator.Setback)) < 0.01,
+		`repairs set back by {GameConfig.Sabotage.Generator.Setback} (from {damaged} to {genA:GetAttribute(
+			"Progress"
+		)})`
+	)
+	check(bannerFor(survivors[1], "GENERATOR A FAULT"), "the fault is announced")
+
+	-- Cameras
+	task.wait(cooldown)
+	check(sabotage(mimic, "Cameras") == "Done", "camera cut accepted")
+	check(roundState:GetAttribute("CamerasOnline") == false, "the camera feed goes dark")
+	task.wait(cooldown)
+	check(sabotage(mimic, "Cameras") == "NoTarget", "cameras that are already down cannot be cut again")
+	check(
+		waitUntil(function()
+			return roundState:GetAttribute("CamerasOnline") == true
+		end, 1),
+		"cameras come back after the outage"
+	)
+
+	-- Everything still active is undone at round end.
+	task.wait(cooldown)
+	root(mimic).CFrame = CFrame.new(400, 3, 5)
+	GameConfig.Sabotage.Lights.Duration = 30
+	GameConfig.Sabotage.Cameras.Duration = 30
+	check(
+		sabotage(mimic, "Lights") == "Done" and sabotage(mimic, "Cameras") == "Done",
+		"long sabotages started"
+	)
+	waitForPhase("Results", 15)
+	task.wait(0.1)
+	check(
+		labLight.Enabled == true and roundState:GetAttribute("CamerasOnline") == true,
+		"round end restores lights and cameras"
+	)
 end)
 
 if not ok then

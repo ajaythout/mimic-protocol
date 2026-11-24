@@ -29,6 +29,7 @@ for _, name in
 		"SetAfk",
 		"RequestStrike",
 		"RequestAbility",
+		"RequestSabotage",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -266,6 +267,35 @@ local ok, err = pcall(function()
 	})
 	task.wait(0.25)
 	check(bar.Feedback.Text == "NOW APPEARING AS ALLY", `impersonation feedback (got {bar.Feedback.Text})`)
+
+	local sabotagePanel = gui.Sabotage.SabotagePanel
+	check(bar.Sabotage.Visible == true and sabotagePanel.Visible == false, "Sabotage slot shown, menu closed")
+	Mock.boundActions.MimicSabotage("MimicSabotage", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	check(
+		sabotagePanel.Visible == true and Mock.boundActions.SabotagePick ~= nil,
+		"G opens the sabotage menu"
+	)
+	Mock.boundActions.SabotagePick(
+		"SabotagePick",
+		roblox.Enum.UserInputState.Begin,
+		{ KeyCode = roblox.Enum.KeyCode.One }
+	)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		lastRequest.remote == "RequestSabotage"
+			and lastRequest.args[1] == "Lights"
+			and sabotagePanel.Visible == false,
+		"1 sends a blackout request and closes the menu"
+	)
+	clientEvent(
+		"AbilityState",
+		{ ability = "Sabotage", readyAt = now() + 60, cooldown = 60, result = "Done", detail = "Lights" }
+	)
+	task.wait(0.25)
+	check(bar.Feedback.Text == "BLACKOUT TRIGGERED", `sabotage feedback (got {bar.Feedback.Text})`)
+	check(bar.Assimilate.Countdown.Text ~= "60", "a sabotage cooldown does not leak onto other slots")
 
 	print("• location readout")
 	player.Character.HumanoidRootPart.CFrame = CFrame.new(5, 3, -90)
