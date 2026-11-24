@@ -112,6 +112,8 @@ GameConfig.Characters.LobbyRespawnDelay = 0.2
 GameConfig.Strike.InitialCooldown = 0
 GameConfig.Strike.Cooldown = 1
 GameConfig.Players.MinStudio = 2
+-- The harness sets its own timings; a developer's Studio speed-up must not rescale them.
+GameConfig.Dev.FastRoundsInStudio = false
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -171,6 +173,19 @@ end
 
 local function root(player)
 	return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function inBay(player): boolean
+	local r = root(player)
+	if not r then
+		return false
+	end
+	for _, p in data.lobbySpawns do
+		if (r.Position - Vector3.new(p[1], p[2], p[3])).Magnitude < 1 then
+			return true
+		end
+	end
+	return false
 end
 
 -- Returns { [player] = payload } for this round's RoleReveal messages.
@@ -329,6 +344,19 @@ local ok, err = pcall(function()
 			return true
 		end),
 		"everyone returns to Standby after the round"
+	)
+	-- The last extraction decides the round; those survivors must still be
+	-- sent to the bay rather than left standing in the closed lift.
+	check(
+		waitUntil(function()
+			for _, s in survivors do
+				if not inBay(s) then
+					return false
+				end
+			end
+			return true
+		end, 3),
+		"extracted survivors are returned to the Deployment Bay"
 	)
 	check(
 		facilityLight.Brightness == 1 and emergencyLight.Enabled == false,

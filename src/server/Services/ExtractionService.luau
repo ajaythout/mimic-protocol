@@ -15,6 +15,7 @@
 	a dozen distance tests). It stops as soon as the lift closes.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
@@ -26,6 +27,7 @@ local Signal = require(Shared.Util.Signal)
 local Announcer = require(script.Parent.Announcer)
 local CharacterService = require(script.Parent.CharacterService)
 local MatchState = require(script.Parent.MatchState)
+local PlayerRegistry = require(script.Parent.PlayerRegistry)
 
 local ExtractionService = {}
 
@@ -87,9 +89,17 @@ local function extract(participant: MatchState.Participant)
 		5
 	)
 
+	-- This extraction can end the round, so by the time the delay runs the
+	-- round may be gone. Key off the character instead: return it to the bay
+	-- unless the player has respawned or been redeployed since.
+	local player = participant.player
+	local character = player.Character
 	task.delay(1.2, function()
-		local player = participant.player
-		if player.Parent and MatchState.getParticipant(player) == participant then
+		if
+			player.Parent == Players
+			and player.Character == character
+			and PlayerRegistry.getStatus(player) ~= "Alive"
+		then
 			CharacterService.spawnInLobby(player)
 		end
 	end)
