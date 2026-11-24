@@ -28,6 +28,8 @@ local AbilityController = {}
 
 local ACTION = "MimicAssimilate"
 local PRESS_INTERVAL = 0.3
+local EDGE_MARGIN = 24
+local JUMP_GAP = 10
 
 local strikeRemote: RemoteEvent
 local readyAt = 0
@@ -36,6 +38,8 @@ local lastPress = 0
 local bound = false
 
 local ui = {} :: {
+	gui: ScreenGui,
+	scale: UIScale,
 	root: Frame,
 	button: TextButton,
 	overlay: Frame,
@@ -82,6 +86,57 @@ local function onAction(_: string, inputState: Enum.UserInputState): Enum.Contex
 	return Enum.ContextActionResult.Sink
 end
 
+-- Touch layout whenever the player is actually using touch, which can change
+-- mid-session (touchscreen laptops, tablets with keyboards, the emulator).
+local function isTouchLayout(): boolean
+	if not UserInputService.TouchEnabled then
+		return false
+	end
+	return not UserInputService.KeyboardEnabled
+		or UserInputService:GetLastInputType() == Enum.UserInputType.Touch
+end
+
+-- Roblox's on-screen jump button, if touch controls are showing.
+local function findJumpButton(): GuiObject?
+	local touchGui = ui.gui.Parent and ui.gui.Parent:FindFirstChild("TouchGui")
+	local frame = touchGui and touchGui:FindFirstChild("TouchControlFrame")
+	local jump = frame and frame:FindFirstChild("JumpButton")
+	if
+		touchGui
+		and touchGui:IsA("ScreenGui")
+		and touchGui.Enabled
+		and jump
+		and jump:IsA("GuiObject")
+		and jump.Visible
+	then
+		return jump
+	end
+	return nil
+end
+
+--[[
+	Bottom-right corner, stacked above the jump button when touch controls are
+	up so a thumb never lands on both. The jump button's size and position
+	depend on screen size, so measure it instead of guessing an offset.
+]]
+local function applyLayout()
+	local touch = isTouchLayout()
+	local size = if touch then 118 else 96
+	ui.root.Size = UDim2.fromOffset(size, size + 26)
+	ui.button.Size = UDim2.fromOffset(size, size)
+
+	local lift = EDGE_MARGIN
+	local jump = if touch then findJumpButton() else nil
+	if jump then
+		-- AbsolutePosition shares one coordinate space across ScreenGuis; offsets
+		-- in this gui are multiplied by its UIScale, so convert pixels back.
+		local guiBottom = ui.gui.AbsolutePosition.Y + ui.gui.AbsoluteSize.Y
+		local pixelsAbove = guiBottom - jump.AbsolutePosition.Y
+		lift = math.max(EDGE_MARGIN, pixelsAbove / math.max(ui.scale.Scale, 0.01) + JUMP_GAP)
+	end
+	ui.root.Position = UDim2.new(1, -EDGE_MARGIN, 1, -lift)
+end
+
 local function shouldShow(): boolean
 	return StateController.isAlive() and StateController.getRole() == "Mimic"
 end
@@ -89,6 +144,9 @@ end
 local function refreshVisibility()
 	local show = shouldShow()
 	ui.root.Visible = show
+	if show then
+		applyLayout() -- touch controls may have appeared since the last layout
+	end
 	if show and not bound then
 		ContextActionService:BindAction(ACTION, onAction, false, Enum.KeyCode.F, Enum.KeyCode.ButtonX)
 		bound = true
@@ -125,15 +183,13 @@ local function refreshCooldown()
 end
 
 local function build()
-	local gui = Components.screen("Abilities", Theme.Layers.Hud + 1)
-	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-	local size = if touchOnly then 118 else 96
+	local gui, scale = Components.screen("Abilities", Theme.Layers.Hud + 1)
+	ui.gui = gui
+	ui.scale = scale
 
 	local root = Components.create("Frame", {
 		Name = "AbilityBar",
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -24, 1, if touchOnly then -150 else -24),
-		Size = UDim2.fromOffset(size, size + 26),
 		BackgroundTransparency = 1,
 		Visible = false,
 		Parent = gui,
@@ -142,7 +198,6 @@ local function build()
 
 	local button, stroke = Components.button({
 		Name = "Assimilate",
-		Size = UDim2.fromOffset(size, size),
 		Position = UDim2.fromOffset(0, 26),
 		Text = "",
 		ClipsDescendants = true,
@@ -212,6 +267,7 @@ local function build()
 	}, "Display")
 
 	button.Activated:Connect(request)
+	applyLayout()
 end
 
 function AbilityController.Start()
@@ -238,6 +294,22 @@ function AbilityController.Start()
 	StateController.StatusChanged:Connect(refreshVisibility)
 	StateController.PhaseChanged:Connect(refreshCooldown)
 	StateController.Tick:Connect(refreshCooldown)
+	UserInputService.LastInputTypeChanged:Connect(applyLayout)
+	ui.scale:GetPropertyChangedSignal("Scale"):Connect(applyLayout)
+	-- Touch controls are created (and resized) by Roblox on its own schedule.
+	local function watchJumpButton(instance: Instance)
+		if instance.Name == "JumpButton" and instance:IsA("GuiObject") then
+			for _, property in { "AbsolutePosition", "AbsoluteSize", "Visible" } do
+				instance:GetPropertyChangedSignal(property):Connect(applyLayout)
+			end
+			task.defer(applyLayout)
+		end
+	end
+	local playerGui = ui.gui.Parent :: Instance
+	playerGui.DescendantAdded:Connect(watchJumpButton)
+	for _, descendant in playerGui:GetDescendants() do
+		watchJumpButton(descendant)
+	end
 	refreshVisibility()
 end
 

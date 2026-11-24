@@ -106,6 +106,8 @@ local EVENT_NAMES = {
 	MouseButton1Up = true,
 	SelectionGained = true,
 	SelectionLost = true,
+	LastInputTypeChanged = true,
+	DescendantAdded = true,
 }
 
 local Methods = {}
@@ -499,6 +501,9 @@ end
 local UserInputService = service("UserInputService")
 rawget(UserInputService, "_props").TouchEnabled = false
 rawget(UserInputService, "_props").KeyboardEnabled = true
+function Methods.GetLastInputType()
+	return roblox.Enum.UserInputType.Keyboard
+end
 local ContextActionService = service("ContextActionService")
 Mock.boundActions = {}
 function Methods.BindAction(self, name, fn)
