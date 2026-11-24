@@ -99,6 +99,7 @@ Net.Names = {
 Net.Abilities = {
 	Assimilate = "Assimilate",
 	ObjectShift = "ObjectShift",
+	IdentityTheft = "IdentityTheft",
 }
 
 local remotesFolder: Folder? = nil

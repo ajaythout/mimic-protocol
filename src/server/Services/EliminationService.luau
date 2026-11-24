@@ -30,6 +30,7 @@ local GameConfig = require(Shared.Config.GameConfig)
 local Net = require(Shared.Net)
 local Phases = require(Shared.Modules.Phases)
 local RateLimiter = require(Shared.Util.RateLimiter)
+local Targeting = require(Shared.Modules.Targeting)
 
 local Announcer = require(script.Parent.Announcer)
 local CharacterService = require(script.Parent.CharacterService)
@@ -65,54 +66,25 @@ local function sendAbilityState(player: Player, result: string?)
 	abilityRemote:FireClient(player, payload)
 end
 
-local function characterParts(): { Instance }
-	local list = {}
-	for _, player in Players:GetPlayers() do
-		if player.Character then
-			table.insert(list, player.Character)
-		end
-	end
-	return list
-end
-
-local function hasLineOfSight(from: Vector3, to: Vector3): boolean
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = characterParts()
-	params.IgnoreWater = true
-	local result = Workspace:Raycast(from, to - from, params)
-	return result == nil
-end
-
 local function findStrikeTarget(attacker: Player): MatchState.Participant?
 	local root = CharacterService.getRoot(attacker)
 	if not root then
 		return nil
 	end
-	local origin = root.Position
-	local facing = root.CFrame.LookVector * Vector3.new(1, 0, 1)
-	facing = if facing.Magnitude > 1e-3 then facing.Unit else Vector3.zAxis
-
-	local best: MatchState.Participant? = nil
-	local bestDistance = GameConfig.Strike.Range
-
+	local candidates: { Targeting.Candidate<MatchState.Participant> } = {}
 	for _, candidate in MatchState.getActiveByRole("Survivor") do
 		local targetRoot = CharacterService.getRoot(candidate.player)
 		if targetRoot then
-			local offset = targetRoot.Position - origin
-			local distance = offset.Magnitude
-			if distance <= bestDistance then
-				local flat = offset * Vector3.new(1, 0, 1)
-				local facingOk = distance <= GameConfig.Strike.CloseRange
-					or (flat.Magnitude > 1e-3 and facing:Dot(flat.Unit) >= GameConfig.Strike.FacingDot)
-				if facingOk and hasLineOfSight(origin, targetRoot.Position) then
-					best = candidate
-					bestDistance = distance
-				end
-			end
+			table.insert(candidates, { position = targetRoot.Position, item = candidate })
 		end
 	end
-	return best
+	return Targeting.pick(
+		root.Position,
+		root.CFrame.LookVector,
+		candidates,
+		GameConfig.Strike,
+		CharacterService.hasLineOfSight
+	)
 end
 
 local function onStrikeRequest(player: Player)

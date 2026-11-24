@@ -18,6 +18,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared.Config.GameConfig)
@@ -192,6 +193,25 @@ function CharacterService.deployTo(player: Player, cframe: CFrame): Model?
 		return character
 	end
 	return CharacterService.spawnAt(player, cframe)
+end
+
+--[[
+	True when nothing but characters lies between two points. Characters
+	(including anything welded into them, like a disguise) never block, so
+	walls, doors and props are what count.
+]]
+function CharacterService.hasLineOfSight(from: Vector3, to: Vector3): boolean
+	local characters = {}
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(characters, player.Character)
+		end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = characters
+	params.IgnoreWater = true
+	return Workspace:Raycast(from, to - from, params) == nil
 end
 
 function CharacterService.getRoot(player: Player): BasePart?

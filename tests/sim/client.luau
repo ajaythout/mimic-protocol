@@ -243,6 +243,30 @@ local ok, err = pcall(function()
 		"Q while disguised asks to drop it (no target)"
 	)
 
+	check(
+		bar.Impersonate.Visible == true and Mock.boundActions.MimicImpersonate ~= nil,
+		"Impersonate slot shown"
+	)
+	Mock.boundActions.MimicImpersonate("MimicImpersonate", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		lastRequest.remote == "RequestAbility"
+			and lastRequest.args[1] == "IdentityTheft"
+			and lastRequest.args[2] == nil,
+		"R sends an intent-only Identity Theft request"
+	)
+	clientEvent("AbilityState", {
+		ability = "IdentityTheft",
+		readyAt = now() + 60,
+		cooldown = 60,
+		result = "Copied",
+		detail = "Ally",
+		activeUntil = now() + 45,
+	})
+	task.wait(0.25)
+	check(bar.Feedback.Text == "NOW APPEARING AS ALLY", `impersonation feedback (got {bar.Feedback.Text})`)
+
 	print("• location readout")
 	player.Character.HumanoidRootPart.CFrame = CFrame.new(5, 3, -90)
 	task.wait(0.6)

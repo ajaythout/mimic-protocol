@@ -90,6 +90,17 @@ GameConfig.ObjectShift = {
 	JumpHeight = 0,
 }
 
+-- Mimic ability: Identity Theft (take another player's look and name) --------
+GameConfig.IdentityTheft = {
+	-- Target selection, same rules as Strike.
+	Range = 10,
+	FacingDot = 0.2,
+	CloseRange = 3.5,
+	Duration = 45,
+	-- Counted from activation.
+	Cooldown = 60,
+}
+
 -- Characters ----------------------------------------------------------------
 GameConfig.Characters = {
 	WalkSpeed = 16,

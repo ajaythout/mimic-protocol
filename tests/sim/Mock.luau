@@ -140,6 +140,7 @@ local function new(className: string, props: { [string]: any }?)
 		props0.HipHeight = 2
 		props0.RigType = roblox.Enum.HumanoidRigType.R15
 		props0.DisplayDistanceType = roblox.Enum.HumanoidDisplayDistanceType.Viewer
+		props0.DisplayName = ""
 		rawget(inst, "_signals").Died = newSignal()
 	end
 	if props then
@@ -384,6 +385,22 @@ end
 
 function Methods.HasTag(self, tag)
 	return rawget(self, "_tags")[tag] == true
+end
+
+-- HumanoidDescription stand-in: an instance whose "Look" attribute names the
+-- character it was read from, so tests can tell whose appearance is applied.
+function Methods.GetAppliedDescription(self)
+	local props = rawget(self, "_props")
+	if not props.AppliedDescription then
+		local description = new("HumanoidDescription", { Name = "HumanoidDescription" })
+		description:SetAttribute("Look", if props.Parent then props.Parent.Name else "?")
+		props.AppliedDescription = description
+	end
+	return props.AppliedDescription
+end
+function Methods.ApplyDescription(self, description)
+	task.wait(0.05) -- the real call yields while assets load
+	rawget(self, "_props").AppliedDescription = description
 end
 
 function Methods.GetPivot(self)

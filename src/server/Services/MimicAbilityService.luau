@@ -16,6 +16,16 @@
 	  they land an assimilation, and at round end; death or a respawn simply
 	  discards it with the old character.
 
+	IDENTITY THEFT  RequestAbility("IdentityTheft")
+	  Intent only: the server picks the nearest other active participant in
+	  front, in range and in line of sight (Shared/Modules/Targeting). The
+	  Mimic takes on that player's HumanoidDescription and Humanoid.DisplayName
+	  for Duration, then gets their own back. The cooldown is claimed before
+	  ApplyDescription yields. If the character dies, respawns or the round
+	  ends while the new look is loading, nothing is left half-applied: a new
+	  character loads the player's own avatar, and a surviving one is put
+	  back. Sending the request again ends the impersonation early.
+
 	Every state change is mirrored to the Mimic with an AbilityState message.
 ]]
 
@@ -29,6 +39,7 @@ local GameConfig = require(Shared.Config.GameConfig)
 local Net = require(Shared.Net)
 local Phases = require(Shared.Modules.Phases)
 local RateLimiter = require(Shared.Util.RateLimiter)
+local Targeting = require(Shared.Modules.Targeting)
 
 local CharacterService = require(script.Parent.CharacterService)
 local MatchState = require(script.Parent.MatchState)
@@ -37,6 +48,7 @@ local PlayerRegistry = require(script.Parent.PlayerRegistry)
 local MimicAbilityService = {}
 
 local SHIFT = Net.Abilities.ObjectShift
+local THEFT = Net.Abilities.IdentityTheft
 local PROP_TAG = "MimicProp"
 local DISGUISE_NAME = "Disguise"
 
@@ -58,8 +70,19 @@ local limiter = RateLimiter.new(
 	GameConfig.RateLimits.RequestAbility.Capacity,
 	GameConfig.RateLimits.RequestAbility.RefillPerSecond
 )
+type Theft = {
+	character: Model,
+	humanoid: Humanoid,
+	original: HumanoidDescription,
+	displayName: string,
+	endsAt: number,
+}
+
 local shifts: { [Player]: Shift } = {}
 local readyAt: { [Player]: number } = {}
+local thefts: { [Player]: Theft } = {}
+local theftReadyAt: { [Player]: number } = {}
+local theftPending: { [Player]: boolean } = {}
 
 local abilityRemote: RemoteEvent
 local templates: Instance? = nil
@@ -79,6 +102,22 @@ local function send(player: Player, result: string?, detail: string?)
 		cooldown = GameConfig.ObjectShift.Cooldown,
 		result = result,
 		activeUntil = if shift then shift.endsAt else nil,
+		detail = detail,
+	}
+	abilityRemote:FireClient(player, payload)
+end
+
+local function sendTheft(player: Player, result: string?, detail: string?)
+	if player.Parent ~= Players then
+		return
+	end
+	local theft = thefts[player]
+	local payload: Net.AbilityStatePayload = {
+		ability = THEFT,
+		readyAt = theftReadyAt[player] or 0,
+		cooldown = GameConfig.IdentityTheft.Cooldown,
+		result = result,
+		activeUntil = if theft then theft.endsAt else nil,
 		detail = detail,
 	}
 	abilityRemote:FireClient(player, payload)
@@ -282,12 +321,152 @@ local function onObjectShift(player: Player, target: unknown)
 	startShift(player, prop)
 end
 
+-- Identity Theft --------------------------------------------------------------
+
+local function applyDescription(humanoid: Humanoid, description: HumanoidDescription): boolean
+	local ok, err = pcall(function()
+		humanoid:ApplyDescription(description)
+	end)
+	if not ok then
+		warn(`[MimicAbilityService] ApplyDescription failed: {err}`)
+	end
+	return ok
+end
+
+local function endTheft(player: Player, restore: boolean, result: string?)
+	local theft = thefts[player]
+	if not theft then
+		return
+	end
+	thefts[player] = nil
+	local alive = player.Character == theft.character and theft.humanoid.Health > 0
+	if restore and alive then
+		theft.humanoid.DisplayName = theft.displayName
+		task.spawn(applyDescription, theft.humanoid, theft.original)
+	end
+	sendTheft(player, result)
+end
+
+local function pickVictim(player: Player, root: BasePart): MatchState.Participant?
+	local round = MatchState.getRound()
+	if not round then
+		return nil
+	end
+	local candidates: { Targeting.Candidate<MatchState.Participant> } = {}
+	for _, participant in round.roster do
+		if participant.player ~= player and participant.fate == "Active" then
+			local targetRoot = CharacterService.getRoot(participant.player)
+			if targetRoot then
+				table.insert(candidates, { position = targetRoot.Position, item = participant })
+			end
+		end
+	end
+	return Targeting.pick(
+		root.Position,
+		root.CFrame.LookVector,
+		candidates,
+		GameConfig.IdentityTheft,
+		CharacterService.hasLineOfSight
+	)
+end
+
+local function onIdentityTheft(player: Player)
+	if thefts[player] then
+		endTheft(player, true, "Restored")
+		return
+	end
+	if theftPending[player] then
+		return
+	end
+	local participant = MatchState.getActiveParticipant(player)
+	if not participant or participant.role ~= "Mimic" then
+		return
+	end
+	if not Phases.HostileAbilities[MatchState.getPhase()] then
+		sendTheft(player, "Locked")
+		return
+	end
+	if now() < (theftReadyAt[player] or 0) then
+		sendTheft(player, "Cooldown")
+		return
+	end
+	local character = player.Character
+	local root = CharacterService.getRoot(player)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character or not root or not humanoid then
+		return
+	end
+	local victim = pickVictim(player, root)
+	local victimCharacter = victim and victim.player.Character
+	local victimHumanoid = victimCharacter and victimCharacter:FindFirstChildOfClass("Humanoid")
+	if not victim or not victimHumanoid then
+		sendTheft(player, "NoTarget")
+		return
+	end
+
+	local okOriginal, original = pcall(function()
+		return humanoid:GetAppliedDescription()
+	end)
+	local okStolen, stolen = pcall(function()
+		return victimHumanoid:GetAppliedDescription()
+	end)
+	if not okOriginal or not okStolen then
+		sendTheft(player, "Failed")
+		return
+	end
+
+	-- Claim the cooldown before ApplyDescription yields.
+	theftReadyAt[player] = now() + GameConfig.IdentityTheft.Cooldown
+	theftPending[player] = true
+	-- Changing shape drops a prop disguise.
+	endShift(player, true, "Reverted")
+	local round = MatchState.getRound()
+	local applied = applyDescription(humanoid, stolen)
+	theftPending[player] = nil
+
+	local stillValid = player.Parent == Players
+		and player.Character == character
+		and humanoid.Health > 0
+		and MatchState.getRound() == round
+		and MatchState.getActiveParticipant(player) == participant
+	if not stillValid then
+		-- The round ended or the character changed while the look loaded. A new
+		-- character already has the player's own avatar; a surviving one is put back.
+		if applied and player.Character == character and humanoid.Health > 0 then
+			task.spawn(applyDescription, humanoid, original)
+		end
+		return
+	end
+	if not applied then
+		sendTheft(player, "Failed")
+		return
+	end
+
+	local theft: Theft = {
+		character = character,
+		humanoid = humanoid,
+		original = original,
+		displayName = humanoid.DisplayName,
+		endsAt = now() + GameConfig.IdentityTheft.Duration,
+	}
+	thefts[player] = theft
+	humanoid.DisplayName = victim.player.DisplayName
+	task.delay(GameConfig.IdentityTheft.Duration, function()
+		if thefts[player] == theft then
+			endTheft(player, true, "Expired")
+		end
+	end)
+	sendTheft(player, "Copied", victim.player.DisplayName)
+end
+
 local function onRequest(player: Player, ability: unknown, target: unknown)
 	if not limiter:consume(player) then
 		return
 	end
 	if ability == SHIFT then
 		onObjectShift(player, target)
+	elseif ability == THEFT then
+		onIdentityTheft(player)
 	end
 end
 
@@ -308,9 +487,14 @@ function MimicAbilityService.Init()
 		if shift and shift.character ~= character then
 			endShift(player, false, nil)
 		end
+		local theft = thefts[player]
+		if theft and theft.character ~= character then
+			endTheft(player, false, nil)
+		end
 	end)
 	CharacterService.Died:Connect(function(player: Player)
 		endShift(player, false, nil)
+		endTheft(player, false, nil)
 	end)
 	PlayerRegistry.PlayerRemoving:Connect(function(player: Player)
 		local shift = shifts[player]
@@ -321,6 +505,9 @@ function MimicAbilityService.Init()
 			shifts[player] = nil
 		end
 		readyAt[player] = nil
+		thefts[player] = nil
+		theftReadyAt[player] = nil
+		theftPending[player] = nil
 		limiter:forget(player)
 	end)
 end
@@ -329,16 +516,28 @@ function MimicAbilityService.isShifted(player: Player): boolean
 	return shifts[player] ~= nil
 end
 
--- Drops any disguise this player is wearing (e.g. they just struck).
+function MimicAbilityService.isImpersonating(player: Player): boolean
+	return thefts[player] ~= nil
+end
+
+-- Drops the prop disguise this player is wearing (e.g. they just struck).
 function MimicAbilityService.reveal(player: Player, result: string?)
 	endShift(player, true, result)
+end
+
+-- Drops every disguise, prop and identity (e.g. a scanner exposed them).
+function MimicAbilityService.unmask(player: Player, result: string?)
+	endShift(player, true, result)
+	endTheft(player, true, result)
 end
 
 -- Gives Mimics their initial cooldown state when abilities wake up.
 function MimicAbilityService.primeCooldowns()
 	for _, mimic in MatchState.getActiveByRole("Mimic") do
 		readyAt[mimic.player] = 0
+		theftReadyAt[mimic.player] = 0
 		send(mimic.player, nil)
+		sendTheft(mimic.player, nil)
 	end
 end
 
@@ -347,7 +546,11 @@ function MimicAbilityService.reset()
 	for player in shifts do
 		endShift(player, true, nil)
 	end
+	for player in thefts do
+		endTheft(player, true, nil)
+	end
 	table.clear(readyAt)
+	table.clear(theftReadyAt)
 end
 
 return MimicAbilityService

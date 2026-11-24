@@ -6,7 +6,7 @@
 	such as a disguise, an "active" timer. Only the local player's role's
 	slots are shown and bound.
 
-	  Mimic   ASSIMILATE [F / ButtonX]   SHIFT [Q / ButtonY]
+	  Mimic   ASSIMILATE [F / ButtonX]   SHIFT [Q / ButtonY]   IMPERSONATE [R / ButtonB]
 
 	The client only sends intent. Cooldowns and active timers come from the
 	server's AbilityState messages; nothing is trusted from local timing. For
@@ -92,6 +92,20 @@ local FEEDBACK: { [string]: { [string]: Feedback } } = {
 		Expired = { text = "DISGUISE FADED", color = MUTED },
 		Revealed = { text = "DISGUISE BROKEN", color = Theme.Colors.Red },
 		NoTarget = { text = "NO PROP IN REACH", color = MUTED },
+		Cooldown = { text = "RECHARGING", color = MUTED },
+		Locked = { text = "ORGANISM DORMANT", color = MUTED },
+	},
+	[Net.Abilities.IdentityTheft] = {
+		Copied = {
+			text = function(detail: string?): string
+				return `NOW APPEARING AS {string.upper(detail or "SOMEONE")}`
+			end,
+			color = Theme.Colors.RedSoft,
+		},
+		Restored = { text = "OWN FORM RESTORED", color = MUTED },
+		Expired = { text = "IMPERSONATION FADED", color = MUTED },
+		NoTarget = { text = "NO ONE IN REACH", color = MUTED },
+		Failed = { text = "IMPERSONATION FAILED", color = MUTED },
 		Cooldown = { text = "RECHARGING", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
 	},
@@ -454,6 +468,21 @@ local function build()
 		activate = function(active: boolean)
 			-- While disguised the same input drops the disguise.
 			abilityRemote:FireServer(Net.Abilities.ObjectShift, if active then nil else aimedProp())
+		end,
+	})
+	buildSlot({
+		id = Net.Abilities.IdentityTheft,
+		name = "Impersonate",
+		title = "IMPERSONATE",
+		key = Enum.KeyCode.R,
+		pad = Enum.KeyCode.ButtonB,
+		action = "MimicImpersonate",
+		accent = Theme.Colors.RedSoft,
+		role = "Mimic",
+		order = 3,
+		activate = function()
+			-- Intent only; pressing while active asks to end it early.
+			abilityRemote:FireServer(Net.Abilities.IdentityTheft)
 		end,
 	})
 	applyLayout()

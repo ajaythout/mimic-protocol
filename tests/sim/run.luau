@@ -143,6 +143,7 @@ GameConfig.Players.MinStudio = 2
 -- The harness sets its own timings; a developer's Studio speed-up must not rescale them.
 GameConfig.Dev.FastRoundsInStudio = false
 GameConfig.ObjectShift.Cooldown = 0.5
+GameConfig.IdentityTheft.Cooldown = 0.5
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -750,6 +751,99 @@ local ok, err = pcall(function()
 			and (mimic.Character == nil or mimic.Character:FindFirstChild("Disguise") == nil),
 		"round end clears every disguise"
 	)
+
+	-- ===================================================================================
+	section("Round 8: Identity Theft")
+	local function lastTheft(player)
+		local found = nil
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "IdentityTheft" then
+				found = args[1]
+			end
+		end
+		return found
+	end
+	local function theftCount(player): number
+		local n = 0
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "IdentityTheft" then
+				n += 1
+			end
+		end
+		return n
+	end
+	local function requestTheft(player)
+		local before = theftCount(player)
+		fire("RequestAbility", player, "IdentityTheft")
+		waitUntil(function()
+			return theftCount(player) > before
+		end, 1)
+		return lastTheft(player)
+	end
+	local function look(player): string?
+		local h = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		return h and h:GetAppliedDescription():GetAttribute("Look")
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	check(requestTheft(mimic).result == "Locked", "Identity Theft is dormant during Deployment")
+	waitForPhase("Active", 10)
+
+	before = theftCount(survivors[1])
+	fire("RequestAbility", survivors[1], "IdentityTheft")
+	task.wait(0.1)
+	check(theftCount(survivors[1]) == before, "Survivors cannot impersonate")
+
+	root(mimic).CFrame = CFrame.new(300, 3, 300)
+	check(requestTheft(mimic).result == "NoTarget", "nobody in reach: no target")
+
+	local ownLook = look(mimic)
+	placeInFront(mimic, survivors[1], 4)
+	state = requestTheft(mimic)
+	humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(
+		state.result == "Copied" and state.detail == survivors[1].DisplayName and (state.activeUntil or 0) > 0,
+		`Mimic copies the survivor in front (got {state.result})`
+	)
+	check(
+		look(mimic) == survivors[1].Name and humanoid.DisplayName == survivors[1].DisplayName,
+		"appearance and display name both copied"
+	)
+	check(Shifts.isImpersonating(mimic), "server tracks the impersonation")
+
+	state = requestTheft(mimic)
+	check(state.result == "Restored", `asking again ends it early (got {state.result})`)
+	check(waitUntil(function()
+		return look(mimic) == ownLook
+	end, 1) and humanoid.DisplayName == "", "own appearance and name restored")
+	check(requestTheft(mimic).result == "Cooldown", "cooldown runs from activation")
+	task.wait(GameConfig.IdentityTheft.Cooldown + 0.1)
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "disguised as a prop first")
+	placeInFront(mimic, survivors[1], 4)
+	GameConfig.IdentityTheft.Duration = 0.4
+	check(requestTheft(mimic).result == "Copied", "impersonating from a prop disguise works")
+	check(
+		not Shifts.isShifted(mimic) and mimic.Character:FindFirstChild("Disguise") == nil,
+		"taking a new identity drops the prop disguise"
+	)
+	check(waitUntil(function()
+		return lastTheft(mimic).result == "Expired"
+	end, 2) and waitUntil(function()
+		return look(mimic) == ownLook
+	end, 1), "the impersonation fades after Duration")
+	GameConfig.IdentityTheft.Duration = 30
+	task.wait(GameConfig.IdentityTheft.Cooldown + 0.1)
+
+	placeInFront(mimic, survivors[1], 4)
+	check(requestTheft(mimic).result == "Copied", "impersonating when the round ends")
+	waitForPhase("Results", 15)
+	check(not Shifts.isImpersonating(mimic), "round end clears every impersonation")
 end)
 
 if not ok then
