@@ -6,3 +6,4 @@
 /dist/
 /build/*.json
 /build/*.svg
+/*.rbxl.lock
