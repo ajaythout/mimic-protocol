@@ -13,6 +13,7 @@
 
 local fs = require("@lune/fs")
 local process = require("@lune/process")
+local roblox = require("@lune/roblox")
 local serde = require("@lune/serde")
 local task = require("@lune/task")
 
@@ -36,6 +37,7 @@ for _, name in
 		"ClientReady",
 		"SetAfk",
 		"RequestStrike",
+		"RequestAbility",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -97,6 +99,32 @@ local emergencyLight =
 	Mock.new("PointLight", { Name = "Emergency", Brightness = 2, Enabled = false, Parent = facility })
 emergencyLight:AddTag("EmergencyLight")
 
+-- Prop library and placed props (Object Shift) ---------------------------------------------
+
+local assets = Mock.new("Folder", { Name = "Assets", Parent = ReplicatedStorage })
+local templates = Mock.new("Folder", { Name = "Props", Parent = assets })
+local function propModel(propId: string, displayName: string, transformable: boolean, at: Vector3, parent)
+	local model = Mock.new("Model", { Name = propId, Parent = parent })
+	local body =
+		Mock.new("Part", { Name = "Body", CFrame = CFrame.new(at + Vector3.new(0, 2, 0)), Parent = model })
+	Mock.new("Part", { Name = "Lid", CFrame = CFrame.new(at + Vector3.new(0, 4, 0)), Parent = model })
+	rawget(model, "_props").PrimaryPart = body
+	model:SetAttribute("PropId", propId)
+	model:SetAttribute("DisplayName", displayName)
+	model:SetAttribute("Transformable", transformable)
+	return model
+end
+propModel("WoodenCrate", "Wooden Crate", true, Vector3.zero, templates)
+propModel("Desk", "Desk", false, Vector3.zero, templates)
+local propsFolder = Mock.new("Folder", { Name = "Props", Parent = facility })
+local nearCrate = propModel("WoodenCrate", "Wooden Crate", true, Vector3.new(6, 0, 0), propsFolder)
+nearCrate:AddTag("MimicProp")
+local farCrate = propModel("WoodenCrate", "Wooden Crate", true, Vector3.new(100, 0, 0), propsFolder)
+farCrate:AddTag("MimicProp")
+-- Tagged by mistake but not transformable: the allowlist must reject it.
+local desk = propModel("Desk", "Desk", true, Vector3.new(-60, 0, 0), propsFolder)
+desk:AddTag("MimicProp")
+
 -- Fast timings (every phase is clamped to >= 1 s by the server) -------------------------------
 
 local GameConfig = Mock.requireModule(shared.Config.GameConfig)
@@ -114,6 +142,7 @@ GameConfig.Strike.Cooldown = 1
 GameConfig.Players.MinStudio = 2
 -- The harness sets its own timings; a developer's Studio speed-up must not rescale them.
 GameConfig.Dev.FastRoundsInStudio = false
+GameConfig.ObjectShift.Cooldown = 0.5
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -605,6 +634,122 @@ local ok, err = pcall(function()
 	end
 	waitForPhase("Deployment", 15)
 	check(true, "next round deploys normally after recovery")
+
+	-- ===================================================================================
+	section("Round 7: Object Shift")
+	local Shifts = Mock.requireModule(serverFolder.Services.MimicAbilityService)
+	local everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	local mimic = mimics[1]
+	local function lastShift(player)
+		local found = nil
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "ObjectShift" then
+				found = args[1]
+			end
+		end
+		return found
+	end
+	local function shiftCount(player): number
+		local n = 0
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "ObjectShift" then
+				n += 1
+			end
+		end
+		return n
+	end
+	local function requestShift(player, target)
+		local before = shiftCount(player)
+		fire("RequestAbility", player, "ObjectShift", target)
+		waitUntil(function()
+			return shiftCount(player) > before
+		end, 1)
+		return lastShift(player)
+	end
+	local function head(player)
+		return player.Character:FindFirstChild("Head")
+	end
+
+	check(requestShift(mimic, nearCrate).result == "Locked", "Object Shift is dormant during Deployment")
+	waitForPhase("Active", 10)
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+
+	local before = shiftCount(survivors[1])
+	fire("RequestAbility", survivors[1], "ObjectShift", nearCrate)
+	task.wait(0.1)
+	check(shiftCount(survivors[1]) == before and not Shifts.isShifted(survivors[1]), "Survivors cannot shift")
+
+	local state = requestShift(mimic, nearCrate)
+	local humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(
+		state.result == "Shifted" and state.detail == "Wooden Crate" and (state.activeUntil or 0) > 0,
+		`Mimic shifts into the aimed prop (got {state.result})`
+	)
+	check(
+		mimic.Character:FindFirstChild("Disguise") ~= nil
+			and head(mimic).Transparency == 1
+			and head(mimic).face.Transparency == 1,
+		"character hidden and the prop clone attached"
+	)
+	check(
+		humanoid.WalkSpeed == GameConfig.ObjectShift.WalkSpeed
+			and humanoid.JumpHeight == 0
+			and humanoid.DisplayDistanceType == roblox.Enum.HumanoidDisplayDistanceType.None,
+		"movement restricted and name plate hidden while disguised"
+	)
+
+	state = requestShift(mimic, nil)
+	check(state.result == "Reverted", `asking again drops the disguise (got {state.result})`)
+	check(
+		mimic.Character:FindFirstChild("Disguise") == nil
+			and head(mimic).Transparency == 0
+			and head(mimic).face.Transparency == 0
+			and humanoid.WalkSpeed == GameConfig.Characters.WalkSpeed
+			and humanoid.DisplayDistanceType == roblox.Enum.HumanoidDisplayDistanceType.Viewer,
+		"appearance, movement and name plate restored"
+	)
+	check(requestShift(mimic, nearCrate).result == "Cooldown", "cooldown starts when the disguise ends")
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+
+	root(mimic).CFrame = CFrame.new(-60, 3, 5)
+	check(
+		requestShift(mimic, desk).result == "NoTarget",
+		"a prop without a transformable template is rejected"
+	)
+	check(requestShift(mimic, farCrate).result == "NoTarget", "a prop out of range is rejected")
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	GameConfig.ObjectShift.MaxDuration = 0.4
+	check(requestShift(mimic, nil).result == "Shifted", "without a hint the server picks the nearest prop")
+	check(waitUntil(function()
+		local last = lastShift(mimic)
+		return last.result == "Expired"
+	end, 2) and head(mimic).Transparency == 0, "the disguise drops on its own after MaxDuration")
+	GameConfig.ObjectShift.MaxDuration = 30
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+
+	check(requestShift(mimic, nearCrate).result == "Shifted", "shifted again")
+	placeInFront(mimic, survivors[1], 2.5)
+	fire("RequestStrike", mimic)
+	check(
+		waitUntil(function()
+			return status(survivors[1]) == "Eliminated"
+		end)
+			and lastShift(mimic).result == "Revealed"
+			and mimic.Character:FindFirstChild("Disguise") == nil,
+		"assimilating from a disguise breaks it"
+	)
+
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "shifted before the round ends")
+	waitForPhase("Results", 15)
+	check(
+		not Shifts.isShifted(mimic)
+			and (mimic.Character == nil or mimic.Character:FindFirstChild("Disguise") == nil),
+		"round end clears every disguise"
+	)
 end)
 
 if not ok then

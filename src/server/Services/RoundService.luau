@@ -43,6 +43,7 @@ local EliminationService = require(script.Parent.EliminationService)
 local ExtractionService = require(script.Parent.ExtractionService)
 local FacilityService = require(script.Parent.FacilityService)
 local MatchState = require(script.Parent.MatchState)
+local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
 local RoleService = require(script.Parent.RoleService)
 
@@ -220,6 +221,7 @@ local function runRound(round: MatchState.Round)
 	local activeDuration = phaseDuration("Active")
 	MatchState.setPhase(Phases.Active, activeDuration)
 	EliminationService.primeCooldowns(GameConfig.Strike.InitialCooldown)
+	MimicAbilityService.primeCooldowns()
 	Announcer.all("CONTAINMENT BREACH", "Something in this facility is not what it seems.", "Critical", 5)
 	mimicPlayers = {}
 	for _, mimic in MatchState.getActiveByRole("Mimic") do
@@ -320,6 +322,7 @@ local function finishRound(round: MatchState.Round)
 	local payload: Net.RoundResultPayload? = nil
 
 	step("environment", function()
+		MimicAbilityService.reset()
 		ExtractionService.close()
 		FacilityService.setLightingMode("Normal")
 	end)

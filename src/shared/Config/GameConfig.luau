@@ -78,6 +78,18 @@ GameConfig.Strike = {
 	CloseRange = 3.5,
 }
 
+-- Mimic ability: Object Shift (disguise as a facility prop) -------------------
+GameConfig.ObjectShift = {
+	-- Max distance from the Mimic's root to the prop being copied.
+	Range = 12,
+	-- Starts when the disguise ends, however it ends.
+	Cooldown = 10,
+	-- The disguise drops on its own after this long.
+	MaxDuration = 60,
+	WalkSpeed = 7,
+	JumpHeight = 0,
+}
+
 -- Characters ----------------------------------------------------------------
 GameConfig.Characters = {
 	WalkSpeed = 16,
@@ -92,6 +104,7 @@ GameConfig.RateLimits = {
 	Default = { Capacity = 6, RefillPerSecond = 2 },
 	SetAfk = { Capacity = 3, RefillPerSecond = 0.5 },
 	RequestStrike = { Capacity = 4, RefillPerSecond = 2 },
+	RequestAbility = { Capacity = 4, RefillPerSecond = 1.5 },
 }
 
 return GameConfig

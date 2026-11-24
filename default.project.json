@@ -19,6 +19,7 @@
         "ClientReady": { "$className": "RemoteEvent" },
         "SetAfk": { "$className": "RemoteEvent" },
         "RequestStrike": { "$className": "RemoteEvent" },
+        "RequestAbility": { "$className": "RemoteEvent" },
         "PrivateState": { "$className": "RemoteEvent" },
         "RoleReveal": { "$className": "RemoteEvent" },
         "AbilityState": { "$className": "RemoteEvent" },

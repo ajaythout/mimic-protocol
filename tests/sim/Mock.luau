@@ -136,6 +136,10 @@ local function new(className: string, props: { [string]: any }?)
 		props0.Health = 100
 		props0.MaxHealth = 100
 		props0.WalkSpeed = 16
+		props0.JumpHeight = 7.2
+		props0.HipHeight = 2
+		props0.RigType = roblox.Enum.HumanoidRigType.R15
+		props0.DisplayDistanceType = roblox.Enum.HumanoidDisplayDistanceType.Viewer
 		rawget(inst, "_signals").Died = newSignal()
 	end
 	if props then
@@ -382,6 +386,45 @@ function Methods.HasTag(self, tag)
 	return rawget(self, "_tags")[tag] == true
 end
 
+function Methods.GetPivot(self)
+	local props = rawget(self, "_props")
+	if props.CFrame then
+		return props.CFrame
+	end
+	local root = Methods.FindFirstChild(self, "HumanoidRootPart") or props.PrimaryPart
+	return if root then root.CFrame else CFrame.new()
+end
+
+-- Deep copy: properties, attributes and tags; PrimaryPart is remapped.
+function Methods.Clone(self)
+	local map = {}
+	local function copy(node)
+		local props = rawget(node, "_props")
+		local clone = new(props.ClassName)
+		map[node] = clone
+		for key, value in props do
+			if key ~= "Parent" and key ~= "PrimaryPart" then
+				rawget(clone, "_props")[key] = value
+			end
+		end
+		for key, value in rawget(node, "_attributes") do
+			rawget(clone, "_attributes")[key] = value
+		end
+		for _, child in rawget(node, "_children") do
+			copy(child).Parent = clone
+		end
+		return clone
+	end
+	local result = copy(self)
+	for original, clone in map do
+		local primary = rawget(original, "_props").PrimaryPart
+		if primary and map[primary] then
+			rawget(clone, "_props").PrimaryPart = map[primary]
+		end
+	end
+	return result
+end
+
 function Methods.PivotTo(self, cframe)
 	local root = Methods.FindFirstChild(self, "HumanoidRootPart") or rawget(self, "_props").PrimaryPart
 	if root then
@@ -501,6 +544,12 @@ end
 local UserInputService = service("UserInputService")
 rawget(UserInputService, "_props").TouchEnabled = false
 rawget(UserInputService, "_props").KeyboardEnabled = true
+function Methods.GetMouseLocation()
+	return roblox.Vector2.new(640, 360)
+end
+function Methods.ViewportPointToRay(_, _x, _y)
+	return { Origin = Vector3.new(0, 10, 0), Direction = Vector3.new(0, 0, -1) }
+end
 function Methods.GetLastInputType()
 	return roblox.Enum.UserInputType.Keyboard
 end
@@ -557,6 +606,8 @@ local function buildCharacter(player)
 		Parent = character,
 	})
 	rawget(character, "_props").PrimaryPart = root
+	local head = new("Part", { Name = "Head", Transparency = 0, Parent = character })
+	new("Decal", { Name = "face", Transparency = 0, Parent = head })
 	new("Humanoid", { Name = "Humanoid", Parent = character })
 	return character
 end

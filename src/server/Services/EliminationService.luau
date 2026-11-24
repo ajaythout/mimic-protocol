@@ -34,6 +34,7 @@ local RateLimiter = require(Shared.Util.RateLimiter)
 local Announcer = require(script.Parent.Announcer)
 local CharacterService = require(script.Parent.CharacterService)
 local MatchState = require(script.Parent.MatchState)
+local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
 
 export type Cause = "Assimilated" | "Hazard"
@@ -141,6 +142,8 @@ local function onStrikeRequest(player: Player)
 
 	-- Claim the cooldown before anything that could yield.
 	readyAt[player] = now + GameConfig.Strike.Cooldown
+	-- Lunging out of a disguise gives it away.
+	MimicAbilityService.reveal(player, "Revealed")
 	EliminationService.eliminate(target, "Assimilated", attacker)
 	sendAbilityState(player, "Hit")
 end

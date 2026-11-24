@@ -28,6 +28,7 @@ for _, name in
 		"ClientReady",
 		"SetAfk",
 		"RequestStrike",
+		"RequestAbility",
 		"PrivateState",
 		"RoleReveal",
 		"AbilityState",
@@ -209,6 +210,38 @@ local ok, err = pcall(function()
 	bar.Assimilate.Activated:Fire()
 	task.wait(0.05)
 	check(sentToServer("RequestStrike") == strikes + 1, "button press during cooldown is not sent")
+
+	check(
+		bar.Shift.Visible == true and Mock.boundActions.MimicShift ~= nil,
+		"Shift slot shown and bound for Mimic"
+	)
+	local shiftRequests = sentToServer("RequestAbility")
+	Mock.boundActions.MimicShift("MimicShift", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	local lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == shiftRequests + 1 and lastRequest.args[1] == "ObjectShift",
+		"Q sends an Object Shift request"
+	)
+	clientEvent("AbilityState", {
+		ability = "ObjectShift",
+		readyAt = 0,
+		cooldown = 10,
+		result = "Shifted",
+		detail = "Wooden Crate",
+		activeUntil = now() + 20,
+	})
+	task.wait(0.25)
+	check(bar.Feedback.Text == "DISGUISED AS WOODEN CRATE", `disguise feedback (got {bar.Feedback.Text})`)
+	check(bar.Shift.KeyHint.Text:find("DROP") ~= nil, "an active disguise offers to drop it")
+	task.wait(0.3)
+	Mock.boundActions.MimicShift("MimicShift", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	lastRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == shiftRequests + 2 and lastRequest.args[2] == nil,
+		"Q while disguised asks to drop it (no target)"
+	)
 
 	print("• location readout")
 	player.Character.HumanoidRootPart.CFrame = CFrame.new(5, 3, -90)

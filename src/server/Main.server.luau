@@ -18,6 +18,7 @@ local ORDER = {
 	"CharacterService",
 	"FacilityService",
 	"RoleService",
+	"MimicAbilityService",
 	"EliminationService",
 	"ExtractionService",
 	"ChatService",
