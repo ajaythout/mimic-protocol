@@ -3,8 +3,15 @@
 Roblox social-deduction survival game. The full design brief lives with the owner; `README.md` covers the architecture, round flow, win conditions, security model and test pipeline. Read it before changing systems.
 
 ## Status
-- **Phase 1 (Playable Foundation): done.** It has been verified with static checks and Lune simulations, but has **not yet been playtested in Roblox Studio**.
-- First job in a Studio-connected session: run the README's *Studio checklist* through the Studio MCP tools (Server & Clients playtest, assimilate, extraction, phone emulator, MicroProfiler). Fix real-engine issues before starting Phase 2.
+- **Phase 1 (Playable Foundation): done and playtested in Studio** (2026-11-23). See the README's *Studio checklist* for what was verified and what was fixed.
+
+## Studio MCP testing notes
+- Server & Clients: the server and each client show up as separate MCP targets (`get_studio_state` says which is the server). Stop the session with Studio's stop button; MCP `start_stop_play(false)` doesn't end a multi-client test.
+- Rojo's toolbar button may be missing from the ribbon. Open its panel with `PluginGuiService["Rojo 7.4.4"].Enabled = true` from `execute_luau` (Edit).
+- Non-scriptable properties such as `TextChatService.ChatVersion` don't live-sync; rebuild the place (`rojo build`) and reopen it.
+- `execute_luau` has its own module cache, so it can't read server module state (roles etc.). Read roles from each client's HUD.
+- With `FastRoundsInStudio`, RoleReveal (1.75 s) and Results (3 s) are too short to catch with MCP screenshots. Use normal timings for those.
+- Tool limits: chat between local test clients isn't delivered, and `user_mouse_input` doesn't produce taps under the device emulator (desktop clicks work).
 
 ## Source of truth
 - The repo is authoritative, and Rojo syncs it into Studio. Do not make Studio-only edits to anything under a Rojo-mapped path; they are lost on the next sync.

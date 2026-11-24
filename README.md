@@ -119,13 +119,16 @@ The game re-evaluates these on every fate change (elimination, extraction, disco
 
 **Not verified here:** anything that needs the real engine. That includes visual look and UI layout on real devices, physics and character feel, lighting performance, and real network latency. Use the Studio checklist below for those.
 
-### Studio checklist for you
+### Studio checklist
 
-- [ ] Clients and Servers, 2–4 players: play a full round. Check that the reveal, HUD and timer look right and that everyone deploys to different rooms.
-- [ ] As a Mimic, assimilate a survivor from behind a crate (should fail: line of sight) and in the open (should succeed).
-- [ ] At Extraction, walk into the lift: you should be extracted and sent to the bay.
-- [ ] Device emulator (phone landscape): check that the HUD, Standby panel and debrief fit, and that the ability button is reachable.
-- [ ] MicroProfiler in the Atrium and Server Vault. The map has 121 active point lights, mostly without shadows.
+Run through the Studio MCP on 2026-11-23 (Server & Clients with 2–3 players, `FastRoundsInStudio` on):
+
+- [x] Full rounds: reveal, HUD and timer look right; players deploy to different rooms.
+- [x] Assimilate from behind a crate fails (line of sight); in the open it succeeds.
+- [x] Walking into the open lift extracts you and sends you to the bay (fixed: the extraction that *ended* the round used to leave that survivor in the lift).
+- [x] Phone landscape (iPhone 17 Pro, Galaxy A06): HUD, Standby panel, reveal and debrief fit; the ability button sits above the jump button (fixed: it used to overlap).
+- [x] MicroProfiler, Atrium and Server Vault, normal and emergency lighting: about 4.2 ms CPU and 0.4–0.6 ms GPU per frame on a desktop GPU. Phones are untested on real hardware.
+- [ ] Chat isolation end to end. Studio's local multi-client test doesn't deliver chat between clients, even with an allow-all callback, so check it on a published private server.
 
 ---
 
