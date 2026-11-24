@@ -2,7 +2,7 @@
 
 Social-deduction survival game for Roblox. Survivors try to escape an underground research facility. Mimics, a shapeshifting organism hiding among the crew, try to stop them.
 
-**Current state: Phase 1 (Playable Foundation) is complete.** That covers the full round loop, secret roles, deployment into a 10-room facility, a basic Mimic attack, the extraction lift, and win/loss resolution. See [Progress](#progress) for details.
+**Current state: Phase 2 (Core Gameplay) is complete** on top of Phase 1's round loop. Mimics can disguise themselves as props (Object Shift) or as other players (Identity Theft) and can sabotage the facility. Survivors must repair generators to power the extraction lift and can expose a Mimic with the Containment Scanner. See [Progress](#progress).
 
 ![Facility plan](docs/facility-plan.png)
 
@@ -16,7 +16,16 @@ Social-deduction survival game for Roblox. Survivors try to escape an undergroun
 3. Optional: to shorten rounds while testing, set `GameConfig.Dev.FastRoundsInStudio = true`. This only takes effect in Studio.
 4. Publish: **File → Publish to Roblox**. No extra API services are needed in Phase 1. DataStores arrive in Phase 5.
 
-Controls: Mimics use **F** (keyboard), **X** (gamepad) or the on-screen button to **ASSIMILATE** a survivor who is close, roughly in front of them, and in line of sight.
+Controls (keyboard / gamepad / touch button):
+
+| Who | Key | Ability |
+|---|---|---|
+| Mimic | **F** / X | ASSIMILATE a survivor close in front of you, in line of sight |
+| Mimic | **Q** / Y | SHIFT into the prop you aim at (press again to drop the disguise) |
+| Mimic | **R** / B | IMPERSONATE the player in front of you for 45 s |
+| Mimic | **G** / D-pad up | SABOTAGE menu, then **1–5**: blackout, lockdown, false alert, generator fault, cut cameras |
+| Survivor | **F** / X | SCAN the player in front of you (one charge per round) |
+| Anyone | **E** / L1 | REPAIR a generator panel; VIEW CAMERAS at the Security Office console (Q/E switch feeds) |
 
 ## Development workflow (Rojo)
 
@@ -45,9 +54,10 @@ ReplicatedStorage
     Modules/RoleAssignment pure, tested: mimic count, weighted fair selection
     Modules/WinConditions  pure, tested: outcome from a round snapshot
     Modules/ChatRules      pure: who can hear whom during a round
+    Modules/Targeting      pure, tested: nearest target in range, in front, in line of sight
     Util/Signal, Janitor, RateLimiter
     Net                    remote accessor + payload types (protocol docs inside)
-  Remotes/           9 authored RemoteEvents
+  Remotes/           11 authored RemoteEvents
   RoundState         Folder whose attributes are the PUBLIC round state
   Assets/Props       22 prop templates (15 Mimic-transformable)
 ServerScriptService/Server  (src/server)
@@ -57,17 +67,23 @@ ServerScriptService/Server  (src/server)
   Services/CharacterService all spawning (CharacterAutoLoads = false)
   Services/RoleService     role assignment + private delivery + replacement
   Services/EliminationService ASSIMILATE validation, deaths → eliminations
+  Services/MimicAbilityService Object Shift + Identity Theft (disguises)
+  Services/GeneratorService  repairable generators; powers the lift
+  Services/SabotageService   Mimic sabotage requests, cooldowns, tells
+  Services/ScannerService    survivors' Containment Scanner
   Services/ExtractionService  lift gates, boarding zone, extraction
-  Services/FacilityService lighting modes (Normal / Emergency)
+  Services/FacilityService lighting modes, blackouts, lockdown doors, cameras
   Services/ChatService     dead/extracted players can't talk to the living
   Services/Announcer       server-authored banners
   Services/RoundService    the state machine (only it advances phases)
 StarterPlayerScripts/Client (src/client)
-  Main + Controllers/      State, Hud, Ability, Lobby, Announcement,
-                           RoleReveal, Results, BayScreen, Effects, CoreGui
+  Main + Controllers/      State, Hud, Ability, Sabotage, Lobby, Announcement,
+                           RoleReveal, Results, BayScreen, Effects, Generator,
+                           Camera, CoreGui
   UI/Theme, UI/Components  design tokens + reusable UI constructors
 Workspace
-  Facility/  Architecture, Props (tagged MimicProp), Spawns, Zones, Extraction
+  Facility/  Architecture (with LockdownDoor slabs), Props (tagged MimicProp),
+             Generators (tagged Generator), CameraTerminal, Spawns, Zones, Extraction
   DeploymentBay/  pre-round lobby with status screen + holo-table mini-map
 ```
 
@@ -81,7 +97,7 @@ Workspace
 - **Deployment:** players are teleported to scattered spawn points. Mimic abilities are still dormant.
 - **Active:** Mimics can ASSIMILATE. The first attack is possible 15 seconds in, then there is a 22-second cooldown.
 - **Escalation:** emergency lighting, red grade, rising tension.
-- **Extraction:** the lift gate opens. Survivors who step inside escape.
+- **Extraction:** the lift gate opens if the generators are back online, or the moment they come back during this phase. Survivors who step inside escape. Scanner false positives shorten this window.
 - **Results:** shows the winner, the reason, and every player's role.
 
 ### Win conditions (`WinConditions.luau`, unit-tested)
@@ -89,7 +105,7 @@ Workspace
 | Outcome | When |
 |---|---|
 | Survivors win | at least ⅓ of the survivor pool (min 1) is extracted, or every Mimic is gone |
-| Mimics win | the quota becomes unreachable, the facility is overrun, or the lift departs short |
+| Mimics win | the quota becomes unreachable, the facility is overrun, the lift departs short, or the lift never got power (PowerFailure) |
 | Cancelled | every participant left, or the round faulted, or the outcome was decided before Active |
 
 The game re-evaluates these on every fate change (elimination, extraction, disconnect) instead of polling. A survivor who disconnects leaves the pool, so one quitter can't decide the round. If every Mimic leaves before Active, a random survivor is **promoted** to Mimic.
@@ -113,9 +129,9 @@ The game re-evaluates these on every fate change (elimination, extraction, disco
 |---|---|
 | `lune run map/build` + `tests/layout_check.py` | Rasterises every collidable part at body height and flood-fills it. All 11 rooms are 100% reachable, all 21 spawns are clear, the lift is reachable when open and sealed when closed. |
 | `luau-lsp analyze` | The whole codebase type-checks against current Roblox API definitions. |
-| `lune run tests/run` | 24 unit tests: role fairness (statistical), weighting, win conditions, rate limiter. |
-| `lune run tests/sim/client` | 49 checks: the real client controllers run against a mocked runtime. Covers readiness toggle, timer, reveal, HUD, ability gating and cooldown, location, banners, results, input unbinding. |
-| `lune run tests/sim/run` | 80 checks: the **real server code** runs six consecutive rounds with simulated players (extraction win, assimilation win, strike validation, Mimic disconnect, replacement Mimic, timer ending, AFK and intermission abort, late joiner, chat isolation, fault recovery). |
+| `lune run tests/run` | 32 unit tests: role fairness (statistical), weighting, win conditions (incl. power failure), targeting, rate limiter. |
+| `lune run tests/sim/client` | 67 checks: the real client controllers run against a mocked runtime. Covers readiness, timer, reveal, HUD, every ability slot (assimilate, shift, impersonate, sabotage menu, scan), location, banners, results, input unbinding. |
+| `lune run tests/sim/run` | 175 checks: the **real server code** runs twelve consecutive rounds with simulated players: extraction and assimilation wins, strike validation, disconnects, replacement Mimic, AFK and late joiners, chat isolation, fault recovery, then Object Shift, Identity Theft, generator repair (and power failure), every sabotage, and the Containment Scanner. |
 
 **Not verified here:** anything that needs the real engine. That includes visual look and UI layout on real devices, physics and character feel, lighting performance, and real network latency. Use the Studio checklist below for those.
 
@@ -146,12 +162,16 @@ Run through the Studio MCP on 2026-11-23 (Server & Clients with 2–3 players, `
 - [x] Client UI: HUD, role reveal, Standby panel, banners, debrief, ability bar
 - [x] Chat isolation for eliminated players; reset disabled in the facility
 
-### Next — Phase 2 (core gameplay)
-- Object Shift: transform into tagged `MimicProp` models (templates already in `Assets/Props`)
-- Identity Theft: copy a player's `HumanoidDescription` and `Humanoid.DisplayName`
-- System Sabotage: lights, cameras, generator progress, false alerts, lockdowns
-- Generator repair objective that gates the extraction lift
-- Survivor counterplay (see the open question below)
+### Phase 2 — Core gameplay ✅ (playtested in Studio 2026-11-24)
+- [x] Object Shift: disguise as any transformable prop in range; slower, no jumping, no name plate; drops on request, after 60 s, on a strike, on a scan, at round end
+- [x] Identity Theft: copy the look and name of the player in front for 45 s, then your own back (safe across respawns and round end)
+- [x] Generator repair: 2 of 3 generators power the lift; Mimics can fake repairs; no power means a PowerFailure loss
+- [x] System Sabotage: blackout, lockdown doors, false alerts, generator faults and camera cuts, each with a cooldown shared by the Mimics and a visible tell
+- [x] Security camera terminal in the Security Office (watch the facility's cameras)
+- [x] Containment Scanner: one charge per survivor; exposes and stuns a Mimic, or costs the team 10 s of lift time on a false positive
 
-### Open design question
-The brief gives survivors no direct way to **act** on a suspicion; they can only survive and escape. Most social-deduction games need one, otherwise investigating has no payoff. My recommendation is a limited **Containment Scanner**: each survivor gets one charge to tag a suspect. A Mimic hit is revealed and stunned. Tagging a fellow survivor costs the whole team extraction time.
+### Next — Phase 3
+See the design brief. Open items carried over: chat isolation still needs an end-to-end check on a published server, and the new Phase 2 UI (4-slot Mimic bar, sabotage menu, camera feed) hasn't been checked in the phone emulator yet.
+
+### Resolved design question
+Survivors needed a way to act on a suspicion. That's now the Containment Scanner, built as proposed: one charge each, a Mimic hit exposes and stuns, and a false positive costs the team lift time.
