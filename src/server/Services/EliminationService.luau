@@ -100,6 +100,10 @@ local function onStrikeRequest(player: Player)
 		return
 	end
 
+	if CharacterService.isStunned(player) then
+		sendAbilityState(player, "Stunned")
+		return
+	end
 	local now = Workspace:GetServerTimeNow()
 	if now < (readyAt[player] or 0) then
 		sendAbilityState(player, "Cooldown")

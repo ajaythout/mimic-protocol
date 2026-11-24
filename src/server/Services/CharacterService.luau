@@ -35,6 +35,7 @@ local LOBBY_TAG = "LobbySpawn"
 local FACILITY_TAG = "FacilitySpawn"
 
 local spawnTokens: { [Player]: number } = {}
+local stunnedUntil: { [Player]: number } = {}
 local pendingRespawns: { [Player]: thread } = {}
 local deathHandler: ((Player, Model) -> ())? = nil
 local random = Random.new()
@@ -116,6 +117,7 @@ function CharacterService.Init()
 	PlayerRegistry.PlayerRemoving:Connect(function(player: Player)
 		cancelPendingRespawn(player)
 		spawnTokens[player] = nil
+		stunnedUntil[player] = nil
 	end)
 end
 
@@ -212,6 +214,37 @@ function CharacterService.hasLineOfSight(from: Vector3, to: Vector3): boolean
 	params.FilterDescendantsInstances = characters
 	params.IgnoreWater = true
 	return Workspace:Raycast(from, to - from, params) == nil
+end
+
+--[[
+	Freezes a living character for `seconds` (no walking or jumping). Ability
+	services refuse requests while isStunned is true. A respawn clears it.
+]]
+function CharacterService.stun(player: Player, seconds: number)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local untilTime = os.clock() + seconds
+	stunnedUntil[player] = untilTime
+	humanoid.WalkSpeed = 0
+	humanoid.JumpHeight = 0
+	task.delay(seconds, function()
+		if stunnedUntil[player] ~= untilTime then
+			return
+		end
+		stunnedUntil[player] = nil
+		if player.Character == character and humanoid.Health > 0 then
+			humanoid.WalkSpeed = GameConfig.Characters.WalkSpeed
+			humanoid.JumpHeight = GameConfig.Characters.JumpHeight
+		end
+	end)
+end
+
+function CharacterService.isStunned(player: Player): boolean
+	local untilTime = stunnedUntil[player]
+	return untilTime ~= nil and os.clock() < untilTime
 end
 
 function CharacterService.getRoot(player: Player): BasePart?

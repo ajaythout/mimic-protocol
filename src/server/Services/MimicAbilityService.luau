@@ -299,6 +299,10 @@ local function onObjectShift(player: Player, target: unknown)
 		send(player, "Locked")
 		return
 	end
+	if CharacterService.isStunned(player) then
+		send(player, "Stunned")
+		return
+	end
 	if now() < (readyAt[player] or 0) then
 		send(player, "Cooldown")
 		return
@@ -384,6 +388,10 @@ local function onIdentityTheft(player: Player)
 	end
 	if not Phases.HostileAbilities[MatchState.getPhase()] then
 		sendTheft(player, "Locked")
+		return
+	end
+	if CharacterService.isStunned(player) then
+		sendTheft(player, "Stunned")
 		return
 	end
 	if now() < (theftReadyAt[player] or 0) then

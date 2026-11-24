@@ -381,7 +381,45 @@ local ok, err = pcall(function()
 	check(gui.RoleReveal.Overlay.Center.Intel.Text == "2 MIMICS HIDE AMONG 8 CREW", "survivor intel line")
 	player:SetAttribute("Status", "Alive")
 	setPhase("Extraction", 20)
-	check(bar.Visible == false, "survivors have no Mimic ability bar")
+	check(
+		bar.Visible == true
+			and bar.Scan.Visible == true
+			and bar.Assimilate.Visible == false
+			and bar.Shift.Visible == false
+			and bar.Sabotage.Visible == false,
+		"survivors get only the scanner on the ability bar"
+	)
+	check(
+		Mock.boundActions.SurvivorScan ~= nil and Mock.boundActions.MimicAssimilate == nil,
+		"F is bound to Scan, not Assimilate"
+	)
+	clientEvent("AbilityState", { ability = "Scan", readyAt = 0, cooldown = 1, charges = 1 })
+	task.wait(0.25)
+	check(bar.Scan.KeyHint.Text:find("x1") ~= nil, `scanner shows its charge (got {bar.Scan.KeyHint.Text})`)
+	local scans = sentToServer("RequestAbility")
+	Mock.boundActions.SurvivorScan("SurvivorScan", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	local scanRequest = Mock.serverLog[#Mock.serverLog]
+	check(
+		sentToServer("RequestAbility") == scans + 1
+			and scanRequest.args[1] == "Scan"
+			and scanRequest.args[2] == nil,
+		"F sends an intent-only scan"
+	)
+	clientEvent(
+		"AbilityState",
+		{ ability = "Scan", readyAt = 0, cooldown = 1, charges = 0, result = "Clear" }
+	)
+	task.wait(0.25)
+	check(
+		bar.Feedback.Text == "CREWMATE: FALSE POSITIVE" and bar.Scan.KeyHint.Text == "SPENT",
+		"a spent scanner says so"
+	)
+	task.wait(0.35)
+	scans = sentToServer("RequestAbility")
+	Mock.boundActions.SurvivorScan("SurvivorScan", roblox.Enum.UserInputState.Begin)
+	task.wait(0.05)
+	check(sentToServer("RequestAbility") == scans, "a spent scanner sends nothing")
 	check(
 		gui.Hud.Objective.Content.Body.Text:find("THE LIFT IS OPEN") ~= nil,
 		"survivor extraction objective"

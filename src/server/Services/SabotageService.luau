@@ -177,6 +177,10 @@ local function onRequest(player: Player, kind: unknown)
 		send(player, kind, "Locked")
 		return
 	end
+	if CharacterService.isStunned(player) then
+		send(player, kind, "Stunned")
+		return
+	end
 	if now() < (readyAt[kind] or 0) then
 		send(player, kind, "Cooldown")
 		return

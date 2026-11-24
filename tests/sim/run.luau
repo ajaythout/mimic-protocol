@@ -205,6 +205,8 @@ GameConfig.Sabotage.Lights.Duration = 1.5
 GameConfig.RateLimits.RequestSabotage = { Capacity = 50, RefillPerSecond = 50 }
 GameConfig.Sabotage.Lockdown.Duration = 0.5
 GameConfig.Sabotage.Cameras.Duration = 0.5
+GameConfig.Scanner.StunSeconds = 0.4
+GameConfig.Scanner.ExposeSeconds = 0.6
 
 -- Harness helpers ------------------------------------------------------------------------------
 
@@ -1215,6 +1217,97 @@ local ok, err = pcall(function()
 	check(
 		labLight.Enabled == true and roundState:GetAttribute("CamerasOnline") == true,
 		"round end restores lights and cameras"
+	)
+
+	-- ===================================================================================
+	section("Round 12: Containment Scanner")
+	local function scanStates(player)
+		local list = {}
+		for _, args in Mock.sent(player, "AbilityState") do
+			if args[1].ability == "Scan" then
+				table.insert(list, args[1])
+			end
+		end
+		return list
+	end
+	local function lastScan(player)
+		local list = scanStates(player)
+		return list[#list] or {}
+	end
+	local function requestScan(player)
+		local before = #scanStates(player)
+		fire("RequestAbility", player, "Scan")
+		waitUntil(function()
+			return #scanStates(player) > before
+		end, 1)
+		return lastScan(player)
+	end
+
+	waitForPhase("Deployment", 15)
+	everyone = Players:GetPlayers()
+	mimics, survivors = split(everyone)
+	mimic = mimics[1]
+	local scannerA, scannerB = survivors[1], survivors[2]
+	local mimicScansBefore = #scanStates(mimic) -- from rounds where this player was a survivor
+	check(requestScan(scannerA).result == "Locked", "the scanner is offline during Deployment")
+	waitForPhase("Active", 10)
+	task.wait(0.1)
+	check(
+		lastScan(scannerA).charges == GameConfig.Scanner.Charges,
+		"each survivor gets their charge when Active starts"
+	)
+	check(#scanStates(mimic) == mimicScansBefore, "Mimics never get a scanner")
+
+	root(scannerA).CFrame = CFrame.new(300, 3, 300)
+	state = requestScan(scannerA)
+	check(state.result == "NoTarget" and state.charges == 1, "a scan that finds nobody costs nothing")
+
+	placeInFront(scannerA, scannerB, 3)
+	state = requestScan(scannerA)
+	check(state.result == "Clear" and state.charges == 0, "scanning a crewmate spends the charge")
+	check(bannerFor(scannerB, "FALSE POSITIVE"), "everyone hears about the false positive")
+	check(requestScan(scannerA).result == "Spent", "no charge, no scan")
+
+	root(mimic).CFrame = CFrame.new(0, 3, 0)
+	task.wait(GameConfig.ObjectShift.Cooldown + 0.1)
+	check(requestShift(mimic, nearCrate).result == "Shifted", "the Mimic hides as a prop")
+	root(scannerA).CFrame = CFrame.new(-300, 3, 300) -- out of the way
+	placeInFront(scannerB, mimic, 3)
+	state = requestScan(scannerB)
+	humanoid = mimic.Character:FindFirstChildOfClass("Humanoid")
+	check(state.result == "Mimic", `a disguised Mimic can be scanned (got {state.result})`)
+	check(
+		not Shifts.isShifted(mimic) and mimic.Character:FindFirstChild("Disguise") == nil,
+		"the scan strips the disguise"
+	)
+	check(mimic.Character:FindFirstChild("Exposed") ~= nil, "the Mimic is highlighted for everyone")
+	check(humanoid.WalkSpeed == 0, "the Mimic is stunned")
+	check(bannerFor(scannerA, "ORGANISM EXPOSED"), "the exposure is announced")
+	placeInFront(mimic, scannerA, 2.5)
+	fire("RequestStrike", mimic)
+	check(waitUntil(function()
+		local last = lastAbility(mimic)
+		return last ~= nil and last.ability == "Assimilate" and last.result == "Stunned"
+	end, 1) and status(scannerA) == "Alive", "a stunned Mimic cannot assimilate")
+	check(
+		waitUntil(function()
+			return humanoid.WalkSpeed == GameConfig.Characters.WalkSpeed
+		end, 1),
+		"the stun wears off"
+	)
+	check(
+		waitUntil(function()
+			return mimic.Character:FindFirstChild("Exposed") == nil
+		end, 1),
+		"the highlight fades"
+	)
+
+	waitForPhase("Extraction", 20)
+	local window = roundState:GetAttribute("PhaseEndsAt") - Workspace:GetServerTimeNow()
+	local shortest = GameConfig.Timings.Extraction * GameConfig.Scanner.MinExtractionFraction
+	check(
+		window <= shortest + 0.2,
+		`the false positive shortened the lift window (got {string.format("%.2f", window)} s, floor {shortest} s)`
 	)
 end)
 

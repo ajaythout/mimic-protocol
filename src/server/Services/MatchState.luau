@@ -43,6 +43,8 @@ export type Round = {
 	mimicCount: number,
 	startingSurvivors: number,
 	extractionClosed: boolean,
+	-- Seconds taken off the extraction window by scanner false positives.
+	extractionPenalty: number,
 	outcome: WinConditions.Outcome?,
 	janitor: Janitor.Janitor,
 }
@@ -94,6 +96,12 @@ function MatchState.setPhase(phase: Phases.Phase, duration: number?)
 	MatchState.PhaseChanged:Fire(phase, phaseEndsAt)
 end
 
+-- Moves the current phase's deadline without changing the phase.
+function MatchState.setPhaseEndsAt(endsAt: number)
+	phaseEndsAt = endsAt
+	roundStateFolder:SetAttribute("PhaseEndsAt", endsAt)
+end
+
 function MatchState.setPublic(name: string, value: any)
 	roundStateFolder:SetAttribute(name, value)
 end
@@ -112,6 +120,7 @@ function MatchState.beginRound(players: { Player }): Round
 		mimicCount = 0,
 		startingSurvivors = 0,
 		extractionClosed = false,
+		extractionPenalty = 0,
 		outcome = nil,
 		janitor = Janitor.new(),
 	}

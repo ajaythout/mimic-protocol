@@ -48,6 +48,7 @@ local MimicAbilityService = require(script.Parent.MimicAbilityService)
 local PlayerRegistry = require(script.Parent.PlayerRegistry)
 local RoleService = require(script.Parent.RoleService)
 local SabotageService = require(script.Parent.SabotageService)
+local ScannerService = require(script.Parent.ScannerService)
 
 local RoundService = {}
 
@@ -187,6 +188,7 @@ local function runRound(round: MatchState.Round)
 	end
 
 	GeneratorService.reset()
+	ScannerService.reset()
 	RoleService.assign(round)
 	round.janitor:Add(MatchState.FateChanged:Connect(function()
 		evaluate(round)
@@ -228,6 +230,7 @@ local function runRound(round: MatchState.Round)
 	EliminationService.primeCooldowns(GameConfig.Strike.InitialCooldown)
 	MimicAbilityService.primeCooldowns()
 	SabotageService.primeCooldowns()
+	ScannerService.primeCharges()
 	Announcer.all("CONTAINMENT BREACH", "Something in this facility is not what it seems.", "Critical", 5)
 	mimicPlayers = {}
 	for _, mimic in MatchState.getActiveByRole("Mimic") do
@@ -290,15 +293,40 @@ local function runRound(round: MatchState.Round)
 		end))
 	end
 
-	local warningAt = math.max(0, extractionDuration - EXTRACTION_FINAL_WARNING)
-	if warningAt > 0 then
-		if waitPhase(warningAt, triggers, over) then
+	-- The window can shrink while it is open (scanner false positives), so wait
+	-- against a deadline that is recomputed whenever the penalty changes.
+	local extractionStart = Workspace:GetServerTimeNow()
+	local shortest = extractionDuration * GameConfig.Scanner.MinExtractionFraction
+	local function deadline(): number
+		return extractionStart + math.max(shortest, extractionDuration - round.extractionPenalty)
+	end
+	MatchState.setPhaseEndsAt(deadline())
+	local penaltyChanged = Signal.new()
+	local deadlineMoved = false
+	round.janitor:Add(ScannerService.PenaltyChanged:Connect(function()
+		MatchState.setPhaseEndsAt(deadline())
+		deadlineMoved = true
+		penaltyChanged:Fire()
+	end))
+	local function wake(): boolean
+		return over() or deadlineMoved
+	end
+	local warned = false
+	while true do
+		local remaining = deadline() - Workspace:GetServerTimeNow()
+		if remaining <= 0 then
+			break
+		end
+		if not warned and remaining <= EXTRACTION_FINAL_WARNING then
+			warned = true
+			Announcer.all(`LIFT DEPARTS IN {math.ceil(remaining)} SECONDS`, nil, "Critical", 4)
+		end
+		local slice = if warned then remaining else remaining - EXTRACTION_FINAL_WARNING
+		deadlineMoved = false
+		waitPhase(slice, { roundInterrupt, penaltyChanged }, wake)
+		if over() then
 			return
 		end
-		Announcer.all(`LIFT DEPARTS IN {EXTRACTION_FINAL_WARNING} SECONDS`, nil, "Critical", 4)
-	end
-	if waitPhase(extractionDuration - warningAt, triggers, over) then
-		return
 	end
 
 	round.extractionClosed = true
@@ -356,6 +384,7 @@ local function finishRound(round: MatchState.Round)
 	step("environment", function()
 		MimicAbilityService.reset()
 		SabotageService.reset()
+		ScannerService.reset()
 		GeneratorService.reset()
 		ExtractionService.close()
 		FacilityService.setLightingMode("Normal")

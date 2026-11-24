@@ -128,6 +128,22 @@ GameConfig.Sabotage = {
 	Cameras = { Cooldown = 60, Duration = 30 },
 }
 
+-- Survivor counterplay: the Containment Scanner ------------------------------
+GameConfig.Scanner = {
+	Charges = 1, -- per survivor per round
+	-- Target selection (same rules as Strike, but shorter reach).
+	Range = 6,
+	FacingDot = 0.3,
+	CloseRange = 2.5,
+	-- A Mimic hit: highlighted for everyone, then briefly frozen.
+	ExposeSeconds = 6,
+	StunSeconds = 3,
+	-- A crewmate hit shortens the team's extraction window by this much...
+	FalsePositivePenalty = 10,
+	-- ...but never below this fraction of the normal window.
+	MinExtractionFraction = 0.25,
+}
+
 -- Security camera terminal (Security Office) --------------------------------
 GameConfig.Cameras = {
 	-- Prompt distance; viewers who step further away leave the feed.

@@ -49,6 +49,7 @@ export type AbilityStatePayload = {
 	result: string?, -- "Hit" | "NoTarget" | "Locked" | "Cooldown" | "Shifted" | "Reverted" | nil
 	activeUntil: number?, -- set while a lasting effect (a disguise) is running
 	detail: string?, -- display text for the result, e.g. the prop's name
+	charges: number?, -- uses left, for limited abilities (Scan)
 }
 
 export type AnnouncementPayload = {
@@ -104,6 +105,7 @@ Net.Abilities = {
 	ObjectShift = "ObjectShift",
 	IdentityTheft = "IdentityTheft",
 	Sabotage = "Sabotage", -- AbilityState.detail names the kind
+	Scan = "Scan", -- survivors' Containment Scanner
 }
 
 -- Sabotage kinds accepted by RequestSabotage (see SabotageService).

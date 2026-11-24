@@ -8,6 +8,7 @@
 
 	  Mimic   ASSIMILATE [F / ButtonX]   SHIFT [Q / ButtonY]   IMPERSONATE [R / ButtonB]
 	          SABOTAGE [G / DPadUp] opens the sabotage menu (SabotageController)
+	  Survivor  SCAN [F / ButtonX], the Containment Scanner (limited charges)
 
 	The client only sends intent. Cooldowns and active timers come from the
 	server's AbilityState messages; nothing is trusted from local timing. For
@@ -50,6 +51,8 @@ type Slot = {
 	role: string,
 	order: number, -- 1 = rightmost
 	activate: (active: boolean) -> (),
+	dormant: string, -- feedback when pressed outside hostile phases
+	charges: number?, -- nil = unlimited
 	readyAt: number,
 	cooldown: number,
 	activeUntil: number,
@@ -77,11 +80,13 @@ local ui = {} :: {
 }
 
 local MUTED = Theme.Colors.TextMuted
+local STUNNED: Feedback = { text = "STUNNED", color = Theme.Colors.Red }
 local FEEDBACK: { [string]: { [string]: Feedback } } = {
 	[Net.Abilities.Assimilate] = {
 		Hit = { text = "ASSIMILATED", color = Theme.Colors.Red },
 		NoTarget = { text = "NO SURVIVOR IN REACH", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
+		Stunned = STUNNED,
 	},
 	[Net.Abilities.ObjectShift] = {
 		Shifted = {
@@ -93,6 +98,8 @@ local FEEDBACK: { [string]: { [string]: Feedback } } = {
 		Reverted = { text = "DISGUISE DROPPED", color = MUTED },
 		Expired = { text = "DISGUISE FADED", color = MUTED },
 		Revealed = { text = "DISGUISE BROKEN", color = Theme.Colors.Red },
+		Scanned = { text = "SCANNED: DISGUISE STRIPPED", color = Theme.Colors.Red },
+		Stunned = STUNNED,
 		NoTarget = { text = "NO PROP IN REACH", color = MUTED },
 		Cooldown = { text = "RECHARGING", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
@@ -108,6 +115,8 @@ local FEEDBACK: { [string]: { [string]: Feedback } } = {
 		Expired = { text = "IMPERSONATION FADED", color = MUTED },
 		NoTarget = { text = "NO ONE IN REACH", color = MUTED },
 		Failed = { text = "IMPERSONATION FAILED", color = MUTED },
+		Scanned = { text = "SCANNED: OWN FORM EXPOSED", color = Theme.Colors.Red },
+		Stunned = STUNNED,
 		Cooldown = { text = "RECHARGING", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
 	},
@@ -128,6 +137,14 @@ local FEEDBACK: { [string]: { [string]: Feedback } } = {
 		},
 		Cooldown = { text = "SYSTEM STILL RECOVERING", color = MUTED },
 		Locked = { text = "ORGANISM DORMANT", color = MUTED },
+		Stunned = STUNNED,
+	},
+	[Net.Abilities.Scan] = {
+		Mimic = { text = "MIMIC DETECTED", color = Theme.Colors.Red },
+		Clear = { text = "CREWMATE: FALSE POSITIVE", color = Theme.Colors.RedSoft },
+		NoTarget = { text = "NO ONE IN SCAN RANGE", color = MUTED },
+		Spent = { text = "SCANNER SPENT", color = MUTED },
+		Locked = { text = "SCANNER OFFLINE", color = MUTED },
 	},
 }
 
@@ -193,7 +210,11 @@ local function press(slot: Slot)
 	local active = slot.activeUntil > now()
 	if not active then
 		if not hostilePhase() then
-			showFeedback("ORGANISM DORMANT", MUTED)
+			showFeedback(slot.dormant, MUTED)
+			return
+		end
+		if slot.charges == 0 then
+			showFeedback("SCANNER SPENT", MUTED)
 			return
 		end
 		if now() < slot.readyAt then
@@ -316,6 +337,14 @@ local function refreshSlot(slot: Slot)
 		slot.stroke.Color = Theme.Colors.StrokeMuted
 		return
 	end
+	if slot.charges ~= nil then
+		local spent = slot.charges <= 0
+		slot.overlay.Size = UDim2.fromScale(1, if spent then 1 else 0)
+		slot.countdown.Text = ""
+		slot.stroke.Color = if spent then Theme.Colors.StrokeMuted else slot.accent
+		slot.keyHint.Text = if spent then "SPENT" else `{hint} x{slot.charges}`
+		return
+	end
 	local remaining = slot.readyAt - t
 	if remaining > 0 then
 		slot.overlay.Size = UDim2.fromScale(1, math.clamp(remaining / slot.cooldown, 0, 1))
@@ -351,6 +380,8 @@ local function buildSlot(def: {
 	role: string,
 	order: number,
 	activate: (active: boolean) -> (),
+	dormant: string?,
+	limited: boolean?,
 }): Slot
 	local button, stroke = Components.button({
 		Name = def.name,
@@ -419,6 +450,8 @@ local function buildSlot(def: {
 		role = def.role,
 		order = def.order,
 		activate = def.activate,
+		dormant = def.dormant or "ORGANISM DORMANT",
+		charges = if def.limited then 0 else nil,
 		readyAt = 0,
 		cooldown = 1,
 		activeUntil = 0,
@@ -519,6 +552,23 @@ local function build()
 			SabotageController.toggle()
 		end,
 	})
+	buildSlot({
+		id = Net.Abilities.Scan,
+		name = "Scan",
+		title = "SCAN",
+		key = Enum.KeyCode.F,
+		pad = Enum.KeyCode.ButtonX,
+		action = "SurvivorScan",
+		accent = Theme.Colors.Cyan,
+		role = "Survivor",
+		order = 1,
+		dormant = "SCANNER OFFLINE",
+		limited = true,
+		activate = function()
+			-- Intent only: the server picks whoever is right in front.
+			abilityRemote:FireServer(Net.Abilities.Scan)
+		end,
+	})
 	applyLayout()
 end
 
@@ -542,6 +592,9 @@ local function onAbilityState(payload: Net.AbilityStatePayload)
 	end
 	slot.readyAt = tonumber(payload.readyAt) or 0
 	slot.cooldown = math.max(1, tonumber(payload.cooldown) or 1)
+	if payload.charges ~= nil and slot.charges ~= nil then
+		slot.charges = tonumber(payload.charges) or 0
+	end
 	slot.activeUntil = tonumber(payload.activeUntil) or 0
 	local messages = FEEDBACK[slot.id]
 	local entry = messages and payload.result and messages[payload.result]
@@ -564,6 +617,9 @@ function AbilityController.Start()
 		for _, slot in slots do
 			slot.readyAt = 0
 			slot.activeUntil = 0
+			if slot.charges ~= nil then
+				slot.charges = 0 -- the server grants charges when abilities wake
+			end
 		end
 		refreshVisibility()
 	end)

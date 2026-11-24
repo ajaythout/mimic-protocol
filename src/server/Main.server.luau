@@ -23,6 +23,7 @@ local ORDER = {
 	"ExtractionService",
 	"GeneratorService",
 	"SabotageService",
+	"ScannerService",
 	"ChatService",
 	"RoundService",
 }
